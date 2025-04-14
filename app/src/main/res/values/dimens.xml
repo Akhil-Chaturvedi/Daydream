@@ -1,0 +1,41 @@
+<resources>
+        <!-- Text Sizes -->
+        <dimen name="text_size_time_in_words">30sp</dimen>
+        <dimen name="text_size_day_date">25sp</dimen>
+        <dimen name="text_size_battery_info">20sp</dimen>
+
+        <!-- Sizes -->
+        <dimen name="battery_icon_width">30dp</dimen>
+        <dimen name="battery_icon_height">30dp</dimen>
+
+        <dimen name="notification_icon_container_width">200dp</dimen>
+        <dimen name="notification_icon_container_height">30dp</dimen>
+        <dimen name="notification_icon_size">24dp</dimen>
+        <dimen name="notification_icon_margin">4dp</dimen>
+
+        <!-- Margins -->
+        <dimen name="margin_top_time_in_words">0dp</dimen>
+        <dimen name="margin_top_day_date">0dp</dimen>
+        <dimen name="margin_top_battery_icon">0dp</dimen>
+        <dimen name="margin_top_battery_info">5dp</dimen>
+        <dimen name="margin_top_song_count">5dp</dimen>
+        <dimen name="margin_top_notification_icons">5dp</dimen>
+
+        <dimen name="margin_start_time_in_words">10dp</dimen>
+        <dimen name="margin_start_battery_icon">8dp</dimen>
+        <dimen name="margin_start_battery_info">5dp</dimen>
+        <dimen name="margin_start_song_count">5dp</dimen>
+        <dimen name="margin_start_notification_icons">6dp</dimen>
+
+        <dimen name="margin_right_time_in_words">0dp</dimen>
+        <dimen name="margin_right_day_date">0dp</dimen>
+        <dimen name="margin_right_battery_icon">0dp</dimen>
+        <dimen name="margin_right_battery_info">0dp</dimen>
+        <dimen name="margin_right_song_count">0dp</dimen>
+
+        <dimen name="margin_bottom_time_in_words">0dp</dimen>
+        <dimen name="margin_bottom_day_date">0dp</dimen>
+        <dimen name="margin_bottom_battery_icon">0dp</dimen>
+        <dimen name="margin_bottom_battery_info">0dp</dimen>
+        <dimen name="margin_bottom_song_count">0dp</dimen>
+</resources>

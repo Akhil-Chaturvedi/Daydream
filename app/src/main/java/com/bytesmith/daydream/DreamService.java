@@ -367,6 +367,10 @@ public class DreamService extends android.service.dreams.DreamService {
 
     // Update methods
     private void updateTimeInWords() {
+        if (timeInWordsTextView == null) {
+            Log.e(TAG, "timeInWordsTextView is null in updateTimeInWords");
+            return; // Prevent potential NPE
+        }
         String timeInWords = getTimeInWords();
         timeInWordsTextView.setText(fromHtml(timeInWords));
     }
@@ -389,6 +393,10 @@ public class DreamService extends android.service.dreams.DreamService {
     }
 
     private void updateDayDateTextView() {
+        if (dayDateTextView == null) {
+            Log.e(TAG, "dayDateTextView is null in updateDayDateTextView");
+            return; // Prevent potential NPE
+        }
         String dayDate = getDayDate();
         dayDateTextView.setText(dayDate);
     }
@@ -400,6 +408,10 @@ public class DreamService extends android.service.dreams.DreamService {
     }
 
     private void updateBatteryInfo() {
+        if (batteryInfoTextView == null || batteryIconImageView == null) {
+            Log.e(TAG, "Battery views are null in updateBatteryInfo");
+            return; // Prevent potential NPE
+        }
         int batteryLevel = getBatteryLevel();
         batteryInfoTextView.setText(batteryLevel + "%");
         int batteryIconResId = getBatteryIconResId(batteryLevel);

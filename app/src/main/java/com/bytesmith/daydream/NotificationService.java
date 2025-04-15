@@ -23,6 +23,7 @@ import android.text.TextUtils;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import java.util.Calendar;
 import java.util.Collections;
@@ -44,6 +45,8 @@ public class NotificationService extends NotificationListenerService {
     private static final String MEDIA_INFO_REQUEST_ACTION = "com.bytesmith.daydream.REQUEST_MEDIA_INFO";
     private static final String SONG_NAME_UPDATED_ACTION = "com.bytesmith.daydream.SONG_NAME_UPDATED";
     private static final long MEDIA_SESSION_CHECK_INTERVAL = 5000; // Check every 5 seconds
+    // Define our own constant for EXTRA_MEDIA_METADATA
+    private static final String EXTRA_MEDIA_METADATA = "android.mediaMetadata";
 
     // Package to exclude from showing icons
     private static final String EXCLUDED_PACKAGE = "com.miui.securitycore";
@@ -213,7 +216,7 @@ public class NotificationService extends NotificationListenerService {
         // Optimized: Convert title to lower case once
         String lowerCaseTitle = title.toLowerCase();
         for (Notification.Action action : actions) {
-            if (action != null && action.title != null &&
+            if (action != null && action.title != null && 
                 action.title.toString().toLowerCase().contains(lowerCaseTitle)) {
                 return true;
             }
@@ -250,18 +253,22 @@ public class NotificationService extends NotificationListenerService {
             Log.d(TAG, "Notification or extras is null for SBN: " + (sbn != null ? sbn.getPackageName() : "null"));
             return null; // Return null if no data
         }
-
+        
         Bundle extras = sbn.getNotification().extras;
         String packageName = sbn.getPackageName();
         Log.d(TAG, "Extracting song name from notification: " + packageName);
 
         // Prioritize MediaMetadata if available (often more reliable)
-        MediaMetadata metadata = extras.getParcelable(Notification.EXTRA_MEDIA_METADATA);
-        if (metadata != null) {
-            String title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE);
-            String artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST);
-             Log.d(TAG, "Extracted from MediaMetadata: title='" + title + "', artist='" + artist + "'");
-            return buildSongString(title, artist);
+        // Requires API 21+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            // Use our custom constant instead
+            MediaMetadata metadata = extras.getParcelable(EXTRA_MEDIA_METADATA);
+            if (metadata != null) {
+                String title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE);
+                String artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST);
+                Log.d(TAG, "Extracted from MediaMetadata: title='" + title + "', artist='" + artist + "'");
+                return buildSongString(title, artist);
+            }
         }
 
         // Fallback to standard notification extras
@@ -283,32 +290,54 @@ public class NotificationService extends NotificationListenerService {
         }
         String packageName = sbn.getPackageName();
         Log.d(TAG, "Notification posted: " + packageName + " ID: " + sbn.getId());
-
+        
         // Add package to the set (filtering happens when getNotificationPackages is called)
         if (!EXCLUDED_PACKAGE.equals(packageName)) {
              if (notificationPackages.add(packageName)) { // Add returns true if not already present
                  Log.d(TAG, "Added package to set: " + packageName);
                  sendUpdateBroadcast(); // Send update if the set changed
-             }
+            }
         } else {
              Log.d(TAG, "Ignoring excluded package: " + packageName);
         }
-
+        
         // Check if it's a media notification
         if (isMediaNotification(sbn)) {
             Log.d(TAG, "Notification identified as media: " + packageName);
             currentlyPlayingMediaPackage = packageName; // Update the currently playing package
 
             String songName = extractSongName(sbn);
-            MediaSession.Token token = sbn.getNotification().extras.getParcelable(Notification.EXTRA_MEDIA_SESSION);
+            // Get the token from the active session, not just the notification extra
+            MediaSession.Token activeToken = findActiveMediaSessionToken();
 
-            Log.d(TAG, "Extracted Song: " + songName + ", Token: " + (token != null));
+            Log.d(TAG, "Extracted Song: " + songName + ", Active Token: " + (activeToken != null));
 
+            // --- Updated Logic --- 
+            if (activeToken != null && !TextUtils.isEmpty(songName)) {
+                 // We have a song name AND an active token
+                 Log.d(TAG, "onNotificationPosted: Updating DreamService with song and token.");
+                 processMediaPlayback(songName, System.currentTimeMillis());
+                 DreamService.updateSongInfo(songName);
+                 sendSongNameBroadcast(songName);
+            } else if (activeToken == null && currentlyPlayingMediaPackage != null && currentlyPlayingMediaPackage.equals(packageName)) {
+                // Media notification posted, but no active token found for the current media app - clear DreamService
+                 Log.w(TAG, "onNotificationPosted: Media notification for current pkg but no active token. Clearing DreamService.");
+                 DreamService.updateSongInfo(null);
+                 currentlyPlayingMediaPackage = null; // Assume it stopped
+                 sendUpdateBroadcast();
+            } else {
+                // Either song name is empty or token is null for a *different* package notification
+                Log.d(TAG, "onNotificationPosted: Song name empty or token null for non-current media package. Doing nothing specific.");
+                // We might still need to update icons if a non-media notification appeared
+                sendUpdateBroadcast(); 
+            }
+            // ---------------------
+            /* // Old logic
             if (!TextUtils.isEmpty(songName)) {
                 Log.d(TAG, "Processing media playback for: " + songName);
                 processMediaPlayback(songName, System.currentTimeMillis());
-                // Update DreamService immediately with extracted info
-                DreamService.updateSongInfo(songName, token);
+                // Update DreamService immediately with extracted info and ACTIVE token
+                DreamService.updateSongInfo(songName, activeToken);
                 // Also send broadcast for any other potential listeners
                 sendSongNameBroadcast(songName);
             } else {
@@ -318,6 +347,7 @@ public class NotificationService extends NotificationListenerService {
             }
             // Send update broadcast regardless to potentially update icon visibility in DreamService
              sendUpdateBroadcast();
+            */
         } else {
              Log.d(TAG, "Notification is not media: " + packageName);
              // If a non-media notification comes from the currently playing app, don't clear it
@@ -481,14 +511,22 @@ public class NotificationService extends NotificationListenerService {
             
             checkMediaSessions();
             
-            // Schedule next check
-            handler.postDelayed(this, MEDIA_SESSION_CHECK_INTERVAL);
+            // Schedule next check - RESTORED
+            // handler.postDelayed(this, MEDIA_SESSION_CHECK_INTERVAL);
         }
     };
+    
+    // ADDED: Helper to reschedule the check
+    private void scheduleNextMediaCheck() {
+        if (isRunning) {
+            handler.postDelayed(mediaSessionCheckRunnable, MEDIA_SESSION_CHECK_INTERVAL);
+        }
+    }
     
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     private void checkMediaSessions() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            scheduleNextMediaCheck(); // Schedule next check even if API too low
             return;
         }
 
@@ -502,14 +540,14 @@ public class NotificationService extends NotificationListenerService {
 
             ComponentName componentName = new ComponentName(this, NotificationService.class);
             List<MediaController> controllers = mediaSessionManager.getActiveSessions(componentName);
-
+            
             if (controllers == null || controllers.isEmpty()) {
                 Log.d(TAG, "No active media sessions found.");
                  // If no sessions are active, potentially clear the currently playing info
                  if (currentlyPlayingMediaPackage != null) {
                      Log.d(TAG, "Clearing currently playing package as no sessions are active.");
                      currentlyPlayingMediaPackage = null;
-                     DreamService.updateSongInfo(null, null);
+                     DreamService.updateSongInfo(null);
                      sendUpdateBroadcast(); // Update icons in DreamService
                  }
                 scheduleNextMediaCheck();
@@ -522,8 +560,8 @@ public class NotificationService extends NotificationListenerService {
             // Find the 'best' controller (e.g., the one actually playing)
             MediaController activeController = null;
             for (MediaController controller : controllers) {
-                 if (controller == null) continue;
-                 PlaybackState playbackState = controller.getPlaybackState();
+                if (controller == null) continue;
+                PlaybackState playbackState = controller.getPlaybackState();
                  if (playbackState != null && playbackState.getState() == PlaybackState.STATE_PLAYING) {
                      activeController = controller;
                      Log.d(TAG, "Found actively playing session: " + controller.getPackageName());
@@ -556,14 +594,14 @@ public class NotificationService extends NotificationListenerService {
                  // Clear the currently playing status.
                  Log.d(TAG, "Previously playing package ("+controllerPackage+") is no longer playing. Clearing status.");
                  currentlyPlayingMediaPackage = null;
-                 DreamService.updateSongInfo(null, null);
+                 DreamService.updateSongInfo(null);
                  sendUpdateBroadcast();
              }
 
 
             final MediaController.Callback mediaCallback = new MediaController.Callback() {
                 @Override
-                public void onPlaybackStateChanged(@Nullable PlaybackState state) {
+                public void onPlaybackStateChanged(/*@Nullable*/ PlaybackState state) { // Removed Nullable annotation
                     if (state == null) return;
                     Log.d(TAG, "MediaController Callback: PlaybackState changed for " +
                           finalActiveController.getPackageName() + ": " + state.getState());
@@ -571,8 +609,8 @@ public class NotificationService extends NotificationListenerService {
                     handlePlaybackStateChange(state, finalActiveController.getSessionToken(), finalActiveController.getPackageName(), finalActiveController.getMetadata());
                 }
 
-                @Override
-                public void onMetadataChanged(@Nullable MediaMetadata metadata) {
+                    @Override
+                public void onMetadataChanged(/*@Nullable*/ MediaMetadata metadata) { // Removed Nullable annotation
                     if (metadata == null) return;
                     Log.d(TAG, "MediaController Callback: Metadata changed for " +
                           finalActiveController.getPackageName());
@@ -597,65 +635,58 @@ public class NotificationService extends NotificationListenerService {
         } catch (Exception e) {
             Log.e(TAG, "Error checking media sessions", e);
         }
+        // Ensure next check is scheduled even if exceptions occur
+        scheduleNextMediaCheck();
     }
 
     // Helper method to handle state changes (called directly now)
     private void handlePlaybackStateChange(@Nullable PlaybackState state, @Nullable MediaSession.Token token, @NonNull String packageName, @Nullable MediaMetadata metadata) {
-         if (state == null) return;
-         int playbackStateInt = state.getState();
+        if (state == null) return;
 
-         if (playbackStateInt == PlaybackState.STATE_PLAYING) {
-             if (!packageName.equals(currentlyPlayingMediaPackage)) {
-                 Log.d(TAG, "Playback started for different package: " + packageName);
-                 currentlyPlayingMediaPackage = packageName;
-                 sendUpdateBroadcast();
-             }
-             // Use existing metadata if available, otherwise rely on metadata change callback
-             handleMetadataChange(metadata != null ? metadata : getCurrentMetadataFromController(token), token);
-         } else {
-             // If the currently playing package is no longer playing
-             if (packageName.equals(currentlyPlayingMediaPackage)) {
-                 Log.d(TAG, "Playback stopped/paused for currently tracked package: " + packageName);
-                 // Don't clear song info immediately, let metadata check handle it or timeout?
-                 // Maybe clear if state is STOPPED or ERROR?
-                 if (playbackStateInt == PlaybackState.STATE_STOPPED || playbackStateInt == PlaybackState.STATE_ERROR) {
+        int stateCode = state.getState();
+        Log.d(TAG, "Playback state changed to: " + stateCode + " for package: " + packageName);
+
+        // Handle state changes
+        switch (stateCode) {
+            case PlaybackState.STATE_PLAYING:
+                currentlyPlayingMediaPackage = packageName;
+                // When playback starts, ensure we get the latest metadata
+                if (metadata != null) {
+                    handleMetadataChange(metadata, token);
+                } else {
+                    // If we don't have metadata yet, try to get it from the controller
+                    MediaMetadata currentMetadata = getCurrentMetadataFromController(token);
+                    if (currentMetadata != null) {
+                        handleMetadataChange(currentMetadata, token);
+                    }
+                }
+                break;
+            case PlaybackState.STATE_PAUSED:
+            case PlaybackState.STATE_STOPPED:
+                if (packageName.equals(currentlyPlayingMediaPackage)) {
                     currentlyPlayingMediaPackage = null;
-                    DreamService.updateSongInfo(null, null);
-                    sendUpdateBroadcast();
-                 }
-             }
-         }
+                    // Clear the song name when playback stops
+                    sendSongNameBroadcast("");
+                }
+                break;
+        }
     }
     
     // Helper method to handle metadata changes (called directly now)
     private void handleMetadataChange(@Nullable MediaMetadata metadata, @Nullable MediaSession.Token token) {
-        if (metadata == null) {
-             Log.d(TAG, "Metadata is null in handleMetadataChange");
-            // If metadata becomes null for the current session, clear the display?
-            // Let's clear only if the state is also not playing.
-             // DreamService.updateSongInfo(null, token);
-             return;
-        }
+        if (metadata == null) return;
+
         String title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE);
         String artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST);
-        String songName = buildSongString(title, artist);
-
-        if (!TextUtils.isEmpty(songName)) {
-            Log.d(TAG, "Updating DreamService with metadata: " + songName);
-            // Use the delayed handler to avoid rapid updates if title/artist change quickly
-            if (pendingSongUpdate != null) {
-                delayedHandler.removeCallbacks(pendingSongUpdate);
+        
+        // Only update if we have a title
+        if (title != null && !title.isEmpty()) {
+            String songName = buildSongString(title, artist);
+            if (!songName.equals(currentSongName)) {
+                currentSongName = songName;
+                sendSongNameBroadcast(songName);
+                Log.d(TAG, "Song name updated to: " + songName);
             }
-            pendingSongUpdate = () -> {
-                DreamService.updateSongInfo(songName, token);
-                sendSongNameBroadcast(songName); // Also update broadcast
-                processMediaPlayback(songName, System.currentTimeMillis()); // Update count
-            };
-            delayedHandler.postDelayed(pendingSongUpdate, SONG_INFO_DELAY);
-        } else {
-             Log.d(TAG, "Metadata updated, but extracted song name is empty.");
-             // Clear info if song becomes empty
-             // DreamService.updateSongInfo(null, token);
         }
     }
     
@@ -676,93 +707,113 @@ public class NotificationService extends NotificationListenerService {
         return currentlyPlayingMediaPackage;
     }
 
-    // Helper method to convert a string to Title Case
-    private String toTitleCase(String input) {
-        if (TextUtils.isEmpty(input)) {
-            return input;
-        }
-        StringBuilder titleCase = new StringBuilder(input.length());
-        boolean nextTitleCase = true;
+    // Rewritten buildSongString based on user specification
+    private String buildSongString(@Nullable String rawTitle, @Nullable String rawArtist) {
+        String processedTitle = null;
+        if (!TextUtils.isEmpty(rawTitle)) {
+            processedTitle = rawTitle;
+            Log.d(TAG, "buildSongString START: title='" + processedTitle + "', artist='" + rawArtist + "'");
 
-        for (char c : input.toCharArray()) {
-            if (Character.isSpaceChar(c)) {
-                nextTitleCase = true;
-            } else if (nextTitleCase) {
-                c = Character.toTitleCase(c);
-                nextTitleCase = false;
-            } else {
-                c = Character.toLowerCase(c); // Ensure rest is lower case
+            // 1. Find " - " and remove it and everything after
+            int dashIndex = processedTitle.indexOf(" - ");
+            if (dashIndex != -1) {
+                processedTitle = processedTitle.substring(0, dashIndex).trim();
+                Log.d(TAG, "buildSongString AFTER ' - ': '" + processedTitle + "'");
             }
-            titleCase.append(c);
+
+            // 2. Find first "." and remove it and everything after
+            int dotIndex = processedTitle.indexOf('.');
+            if (dotIndex != -1) {
+                processedTitle = processedTitle.substring(0, dotIndex).trim();
+                 Log.d(TAG, "buildSongString AFTER '.': '" + processedTitle + "'");
+            }
+
+            // 3. Remove parentheses and their content
+            processedTitle = processedTitle.replaceAll("\\(.*?\\)", "").trim();
+            Log.d(TAG, "buildSongString AFTER '()': '" + processedTitle + "'");
+
+            // 4. Remove artist words (case-insensitive, whole words)
+            if (!TextUtils.isEmpty(rawArtist)) {
+                String[] artistWords = rawArtist.split("\\s+"); // Split artist name by whitespace
+                for (String word : artistWords) {
+                     if (!TextUtils.isEmpty(word)) {
+                         String regex = "(?i)\\b" + java.util.regex.Pattern.quote(word) + "\\b";
+                         String beforeReplace = processedTitle;
+                         processedTitle = processedTitle.replaceAll(regex, "").trim();
+                         if (!processedTitle.equals(beforeReplace)) {
+                              Log.d(TAG, "buildSongString Removed artist word '"+word+"': '" + processedTitle + "'");
+                         }
+                     }
+                }
+                // Clean up potential double spaces left after removal
+                processedTitle = processedTitle.replaceAll("\\s{2,}", " ").trim();
+            }
+            
+            // If title becomes empty after processing, set it back to null
+            if (TextUtils.isEmpty(processedTitle)) {
+                processedTitle = null;
+            }
         }
-        return titleCase.toString();
-    }
 
-    private String buildSongString(@Nullable String title, @Nullable String artist) {
-        String cleanTitle = applyFilters(toTitleCase(title));
-        String cleanArtist = applyFilters(toTitleCase(artist));
-
-        // Use TextUtils.isEmpty for null/empty checks
-        boolean hasTitle = !TextUtils.isEmpty(cleanTitle);
-        boolean hasArtist = !TextUtils.isEmpty(cleanArtist);
+        // Combine processed title and original artist
+        boolean hasTitle = !TextUtils.isEmpty(processedTitle);
+        boolean hasArtist = !TextUtils.isEmpty(rawArtist);
+        String finalString;
 
         if (hasTitle && hasArtist) {
-            // Check if artist info is already contained within the title (e.g., "Song Title - Artist")
-            if (cleanTitle.toLowerCase().contains(cleanArtist.toLowerCase())) {
-                return cleanTitle; // Return only title if artist is redundant
-            }
-            // Use StringBuilder for concatenation
-            return new StringBuilder().append(cleanTitle).append('\n').append(cleanArtist).toString();
+            finalString = processedTitle + "\n" + rawArtist;
         } else if (hasTitle) {
-            return cleanTitle;
+            finalString = processedTitle;
         } else if (hasArtist) {
-            return cleanArtist; // Should this happen? Maybe return null?
+            // Decide if we should return only artist if title is missing/empty
+            // Let's return artist if title processing resulted in null or was initially null
+            finalString = rawArtist;
         } else {
-            return null; // Return null if both are empty
+            finalString = null; // Both are null or empty
         }
-    }
 
-    // Helper method to apply filters to song/artist strings
-    private String applyFilters(String input) {
-        if (input == null || input.isEmpty()) {
-            return input;
-        }
-        
-        // 1. Remove content within parentheses (including parentheses)
-        String filtered = input.replaceAll("\\(.*?\\)", "").trim();
-        
-        // 2. Remove content after the first dot (including the dot)
-        int dotIndex = filtered.indexOf('.');
-        if (dotIndex != -1) {
-            filtered = filtered.substring(0, dotIndex).trim();
-        }
-        
-        // Trim again just in case
-        return filtered.trim(); 
+        Log.d(TAG, "buildSongString FINAL combined: '" + finalString + "'");
+
+        return finalString; // Return the combined string or null
     }
 
     // Helper method to find the currently active playing MediaSession token
     private MediaSession.Token findActiveMediaSessionToken() {
         MediaSessionManager mediaSessionManager = (MediaSessionManager) getSystemService(Context.MEDIA_SESSION_SERVICE);
-        if (mediaSessionManager == null) return null;
+        if (mediaSessionManager == null) {
+            Log.e(TAG, "MediaSessionManager is null, cannot check sessions.");
+            return null;
+        }
         
         try {
             ComponentName componentName = new ComponentName(this, this.getClass());
             List<MediaController> controllers = mediaSessionManager.getActiveSessions(componentName);
             
+            if (controllers == null || controllers.isEmpty()) {
+                Log.d(TAG, "No active media sessions found.");
+                return null;
+            }
+
+            Log.d(TAG, "Found " + controllers.size() + " active media session(s).");
+
             for (MediaController controller : controllers) {
                 if (controller == null) continue;
                 PlaybackState playbackState = controller.getPlaybackState();
-                if (playbackState != null && playbackState.getState() == PlaybackState.STATE_PLAYING) {
-                    // Found the active playing session
-                     Log.d(TAG, "Found active token for package: " + controller.getPackageName());
-                    return controller.getSessionToken();
+                if (playbackState != null) {
+                    Log.d(TAG, "Controller package: " + controller.getPackageName() + ", PlaybackState: " + playbackState.getState());
+                    if (playbackState.getState() == PlaybackState.STATE_PLAYING) {
+                        // Found the active playing session
+                        Log.d(TAG, "Found active token for package: " + controller.getPackageName());
+                        return controller.getSessionToken();
+                    }
+                } else {
+                    Log.d(TAG, "PlaybackState is null for package: " + controller.getPackageName());
                 }
             }
         } catch (SecurityException e) {
             Log.e(TAG, "SecurityException finding active media session token", e);
         } catch (Exception e) {
-             Log.e(TAG, "Exception finding active media session token", e);
+            Log.e(TAG, "Exception finding active media session token", e);
         }
         Log.d(TAG, "No active playing media session token found.");
         return null;

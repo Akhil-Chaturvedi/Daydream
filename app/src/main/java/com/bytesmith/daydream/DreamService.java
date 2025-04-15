@@ -23,9 +23,12 @@ import android.widget.RelativeLayout;
 import android.widget.TextView;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
-import android.media.session.MediaController;
-import android.media.session.MediaSession;
-import android.media.session.PlaybackState;
+import android.graphics.Color;
+import android.os.Build;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import android.view.KeyEvent;
+import android.media.AudioManager;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -37,11 +40,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.lang.ref.WeakReference;
-import android.graphics.Color;
-import android.os.Build;
-import android.view.WindowCallbackWrapper;
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 
 public class DreamService extends android.service.dreams.DreamService {
 
@@ -51,8 +49,6 @@ public class DreamService extends android.service.dreams.DreamService {
     private static final long SHIFT_DURATION = 10000; // 10 seconds for text shifting
     private static final int SHIFT_AMOUNT = 100; // Pixel shift amount
     private static final int MAX_SHIFTS = 5;
-    private static final int ICON_TEXT_SPACING_DP = 4; // Constant for spacing
-
 
     private TextView timeInWordsTextView;
     private TextView dayDateTextView;
@@ -69,8 +65,7 @@ public class DreamService extends android.service.dreams.DreamService {
     private static int songCount = 0;
     private boolean isUpdating = false;
     private GestureDetector gestureDetector;
-    private static MediaController currentMediaController = null;
-    private static final Object controllerLock = new Object(); // Lock for static controller access
+    private AudioManager audioManager;
 
     // Reusable formatters
     private static final SimpleDateFormat TIME_WORDS_FORMAT = new SimpleDateFormat("hh_mm_a", Locale.getDefault());
@@ -80,6 +75,7 @@ public class DreamService extends android.service.dreams.DreamService {
     public void onCreate() {
         super.onCreate();
         instanceRef = new WeakReference<>(this);
+        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
     }
 
     private final Runnable updateTimeRunnable = new Runnable() {
@@ -122,12 +118,32 @@ public class DreamService extends android.service.dreams.DreamService {
         }
     };
 
+    @SuppressLint("ClickableViewAccessibility")
     @Override
     public void onAttachedToWindow() {
         super.onAttachedToWindow();
         instanceRef = new WeakReference<>(this);
         registerReceiver(songNameReceiver, new IntentFilter("com.bytesmith.daydream.SONG_NAME_UPDATED"));
         initializeDreamService();
+
+        // Initialize GestureDetector
+        gestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onDoubleTap(MotionEvent e) {
+                Log.d(TAG, "Double tap detected, finishing DreamService.");
+                finish(); // Finish the dream on double tap
+                return true; // Consume the event
+            }
+        });
+
+        // Set OnTouchListener on the root view to detect gestures
+        getWindow().getDecorView().setOnTouchListener((v, event) -> {
+            gestureDetector.onTouchEvent(event);
+            // Return true to indicate the event was handled if the gesture detector handled it.
+            // Returning false allows other touch handling (like simple interaction) to occur.
+            // Let's return true to prioritize the double-tap exit.
+            return true;
+        });
     }
 
     private void initializeDreamService() {
@@ -153,166 +169,6 @@ public class DreamService extends android.service.dreams.DreamService {
         // Request media notification info immediately to display current playing songs
         Intent intent = new Intent("com.bytesmith.daydream.REQUEST_MEDIA_INFO");
         sendBroadcast(intent);
-        
-        // Get AudioManager
-        final android.media.AudioManager audioManager = (android.media.AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        
-        // Set up key event handling for the window using WindowCallbackWrapper for simplicity (API 23+)
-        final android.view.Window.Callback oldCallback = getWindow().getCallback();
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            getWindow().setCallback(new WindowCallbackWrapper(oldCallback) {
-                @Override
-                public boolean dispatchKeyEvent(android.view.KeyEvent event) {
-                    int keyCode = event.getKeyCode();
-                    int action = event.getAction();
-
-                    // Handle volume keys on KeyDown event
-                    if (action == android.view.KeyEvent.ACTION_DOWN) {
-                        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
-                            Log.d(TAG, "Volume Up key pressed, adjusting volume (no UI) and consuming event.");
-                            audioManager.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
-                                                        android.media.AudioManager.ADJUST_RAISE,
-                                                        0);
-                            return true; // Consume the event
-                        } else if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) {
-                            Log.d(TAG, "Volume Down key pressed, adjusting volume (no UI) and consuming event.");
-                            audioManager.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
-                                                        android.media.AudioManager.ADJUST_LOWER,
-                                                        0);
-                            return true; // Consume the event
-                        }
-                    }
-
-                    // If it wasn't a volume key down event, let the default callback handle it
-                    return super.dispatchKeyEvent(event);
-                }
-
-                @Override
-                public boolean dispatchTouchEvent(android.view.MotionEvent event) {
-                    // Pass the event to the GestureDetector first
-                    boolean handledByGestureDetector = gestureDetector.onTouchEvent(event);
-                    Log.d(TAG, "dispatchTouchEvent: handledByDetector=" + handledByGestureDetector);
-
-                    // If the GestureDetector handled it (e.g., double-tap), we consume it.
-                    if (handledByGestureDetector) {
-                        return true;
-                    }
-
-                    // Otherwise, let the original callback handle it (allows touch to pass to views like TextView)
-                    return super.dispatchTouchEvent(event);
-                }
-            });
-        } else {
-             // Fallback for older APIs (keep original complex callback if needed, though unlikely given other API checks)
-             // For brevity, assuming minSdk >= 23 based on other code. If not, the original anonymous class should be kept here.
-             Log.w(TAG, "Window callback simplification requires API 23+. Using original callback.");
-             // The original anonymous class implementation would go here as a fallback.
-             // However, the original code also used API 23 checks, so this path is likely not needed.
-             // Keeping the original complex anonymous inner class here for absolute safety if minSdk < 23:
-             getWindow().setCallback(new android.view.Window.Callback() {
-                 // --- Paste the entire original anonymous inner class code here ---
-                 // (Removed for brevity in this example, but should be included if <23 support is critical)
-                  @Override
-                  public boolean dispatchKeyEvent(android.view.KeyEvent event) {
-                      int keyCode = event.getKeyCode();
-                      int action = event.getAction();
-
-                      if (action == android.view.KeyEvent.ACTION_DOWN) {
-                          if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
-                              Log.d(TAG, "Volume Up key pressed, adjusting volume (no UI) and consuming event.");
-                              audioManager.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
-                                                            android.media.AudioManager.ADJUST_RAISE,
-                                                            0);
-                              return true; // Consume the event
-                          } else if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) {
-                              Log.d(TAG, "Volume Down key pressed, adjusting volume (no UI) and consuming event.");
-                              audioManager.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
-                                                            android.media.AudioManager.ADJUST_LOWER,
-                                                            0);
-                              return true; // Consume the event
-                          }
-                      }
-                      return oldCallback != null && oldCallback.dispatchKeyEvent(event);
-                  }
-                   @Override
-                  public boolean dispatchKeyShortcutEvent(android.view.KeyEvent event) { return oldCallback != null && oldCallback.dispatchKeyShortcutEvent(event); }
-                   @Override
-                  public boolean dispatchTouchEvent(android.view.MotionEvent event) {
-                      boolean handledByGestureDetector = gestureDetector.onTouchEvent(event);
-                      Log.d(TAG, "dispatchTouchEvent: handledByDetector=" + handledByGestureDetector);
-                      if (handledByGestureDetector) { return true; }
-                      return oldCallback != null ? oldCallback.dispatchTouchEvent(event) : false;
-                  }
-                   @Override
-                  public boolean dispatchTrackballEvent(android.view.MotionEvent event) { return oldCallback != null && oldCallback.dispatchTrackballEvent(event); }
-                   @Override
-                  public boolean dispatchGenericMotionEvent(android.view.MotionEvent event) { return oldCallback != null && oldCallback.dispatchGenericMotionEvent(event); }
-                   @Override
-                  public boolean dispatchPopulateAccessibilityEvent(android.view.accessibility.AccessibilityEvent event) { return oldCallback != null && oldCallback.dispatchPopulateAccessibilityEvent(event); }
-                   @Override
-                  public View onCreatePanelView(int featureId) { return oldCallback != null ? oldCallback.onCreatePanelView(featureId) : null; }
-                   @Override
-                  public boolean onCreatePanelMenu(int featureId, android.view.Menu menu) { return oldCallback != null && oldCallback.onCreatePanelMenu(featureId, menu); }
-                   @Override
-                  public boolean onPreparePanel(int featureId, View view, android.view.Menu menu) { return oldCallback != null && oldCallback.onPreparePanel(featureId, view, menu); }
-                   @Override
-                  public boolean onMenuOpened(int featureId, android.view.Menu menu) { return oldCallback != null && oldCallback.onMenuOpened(featureId, menu); }
-                   @Override
-                  public boolean onMenuItemSelected(int featureId, android.view.MenuItem item) { return oldCallback != null && oldCallback.onMenuItemSelected(featureId, item); }
-                   @Override
-                  public void onWindowAttributesChanged(android.view.WindowManager.LayoutParams attrs) { if (oldCallback != null) oldCallback.onWindowAttributesChanged(attrs); }
-                   @Override
-                  public void onContentChanged() { if (oldCallback != null) oldCallback.onContentChanged(); }
-                   @Override
-                  public void onWindowFocusChanged(boolean hasFocus) { if (oldCallback != null) oldCallback.onWindowFocusChanged(hasFocus); }
-                   @Override
-                  public void onAttachedToWindow() { if (oldCallback != null) oldCallback.onAttachedToWindow(); }
-                   @Override
-                  public void onDetachedFromWindow() { if (oldCallback != null) oldCallback.onDetachedFromWindow(); }
-                   @Override
-                  public void onPanelClosed(int featureId, android.view.Menu menu) { if (oldCallback != null) oldCallback.onPanelClosed(featureId, menu); }
-                   @Override
-                  public boolean onSearchRequested() { return oldCallback != null && oldCallback.onSearchRequested(); }
-                   @Override
-                  public boolean onSearchRequested(android.view.SearchEvent searchEvent) {
-                      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) { return oldCallback != null && oldCallback.onSearchRequested(searchEvent); }
-                      return false;
-                  }
-                   @Override
-                  public android.view.ActionMode onWindowStartingActionMode(android.view.ActionMode.Callback callback) { return oldCallback != null ? oldCallback.onWindowStartingActionMode(callback) : null; }
-                   @Override
-                  public android.view.ActionMode onWindowStartingActionMode(android.view.ActionMode.Callback callback, int type) {
-                      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) { return oldCallback != null ? oldCallback.onWindowStartingActionMode(callback, type) : null; }
-                      return null;
-                  }
-                   @Override
-                  public void onActionModeStarted(android.view.ActionMode mode) { if (oldCallback != null) oldCallback.onActionModeStarted(mode); }
-                   @Override
-                  public void onActionModeFinished(android.view.ActionMode mode) { if (oldCallback != null) oldCallback.onActionModeFinished(mode); }
-             });
-        }
-
-        // --- Initialize GestureDetector --- 
-        gestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
-            @Override
-            public boolean onDoubleTap(MotionEvent e) {
-                Log.d(TAG, "Double tap detected, finishing DreamService.");
-                finish(); // Exit the screensaver
-                return true; // Indicate the double tap was handled
-            }
-            
-             // Optional: If you want to consume other gestures like single tap 
-             // without exiting, you might override other methods and return true.
-             // For example, to consume single taps:
-             /*
-             @Override
-            public boolean onSingleTapConfirmed(MotionEvent e) {
-                 Log.d(TAG, "Single tap consumed.");
-                 return true;
-             }
-             */
-        });
-        // --------------------------------
     }
 
     private void setSystemUiVisibility() {
@@ -395,7 +251,7 @@ public class DreamService extends android.service.dreams.DreamService {
         batteryIconLayoutParams.setMargins(
                 getResources().getDimensionPixelSize(R.dimen.margin_start_battery_icon),
                 getResources().getDimensionPixelSize(R.dimen.margin_top_battery_icon),
-                dpToPx(ICON_TEXT_SPACING_DP), // Use constant for right margin
+                0, 
                 0
         );
         batteryIconImageView.setLayoutParams(batteryIconLayoutParams);
@@ -407,7 +263,7 @@ public class DreamService extends android.service.dreams.DreamService {
         batteryInfoLayoutParams.addRule(RelativeLayout.ALIGN_TOP, R.id.battery_icon);
         batteryInfoLayoutParams.addRule(RelativeLayout.ALIGN_BOTTOM, R.id.battery_icon);
         batteryInfoLayoutParams.setMargins(
-                dpToPx(ICON_TEXT_SPACING_DP), // Use constant for start margin
+                0,
                 0,
                 getResources().getDimensionPixelSize(R.dimen.margin_right_battery_info),
                 0
@@ -430,14 +286,6 @@ public class DreamService extends android.service.dreams.DreamService {
         songCountTextView.setLayoutParams(songCountLayoutParams);
         // Add: Center the text vertically within the TextView's bounds
         songCountTextView.setGravity(android.view.Gravity.CENTER_VERTICAL);
-
-        // --- Setup Click Listener for Song Name TextView --- 
-        if (songNameTextView != null) {
-            songNameTextView.setOnClickListener(v -> togglePlayPause());
-        } else {
-             Log.e(TAG, "Cannot set click listener, songNameTextView is null during init");
-        }
-        // --------------------------------------------------
     }
 
     private void setLayoutParams(View view, int marginStartRes, int marginTopRes, int marginRightRes, int marginBottomRes) {
@@ -503,6 +351,8 @@ public class DreamService extends android.service.dreams.DreamService {
         restoreBrightness();
         unregisterReceiver(songNameReceiver);
         super.onDetachedFromWindow();
+        // Clean up listener to prevent memory leaks
+        getWindow().getDecorView().setOnTouchListener(null);
     }
 
     private void stopNotificationService() {
@@ -706,7 +556,7 @@ public class DreamService extends android.service.dreams.DreamService {
                 Log.d(TAG, "Received broadcast with song name: " + (songName != null ? songName : "null"));
                 if (songName != null && !songName.isEmpty()) {
                     Log.d(TAG, "Received song name via broadcast: " + songName);
-                    updateSongInfo(songName, null);
+                    updateSongInfo(songName);
                 }
             }
         }
@@ -717,9 +567,8 @@ public class DreamService extends android.service.dreams.DreamService {
      * This method can be called from any thread and will update the UI on the main thread.
      *
      * @param songName The name of the song to display, or null if no song is playing
-     * @param token The MediaSession.Token associated with the media player
      */
-    public static void updateSongInfo(@Nullable String songName, @Nullable MediaSession.Token token) {
+    public static void updateSongInfo(@Nullable String songName) {
         DreamService instance = instanceRef == null ? null : instanceRef.get();
         if (instance == null || instance.handler == null) {
             Log.e(TAG, "DreamService instance or handler is null in updateSongInfo");
@@ -733,27 +582,7 @@ public class DreamService extends android.service.dreams.DreamService {
                 return;
             }
             
-            Log.d(TAG, "updateSongInfo received: " + (songName != null ? songName : "null") + ", Token: " + (token != null));
-
-            // Update MediaController
-            synchronized (controllerLock) {
-                if (token == null) {
-                    currentMediaController = null;
-                } else {
-                    try {
-                        // Check if token is different before creating new controller
-                        if (currentMediaController == null || !token.equals(currentMediaController.getSessionToken())) {
-                             Log.d(TAG, "Creating new MediaController from token.");
-                             currentMediaController = new MediaController(instance, token);
-                        } else {
-                             Log.d(TAG, "Using existing MediaController.");
-                        }
-                    } catch (Exception e) { // Catch potential SecurityException or others
-                        Log.e(TAG, "Error creating MediaController from token", e);
-                        currentMediaController = null;
-                    }
-                }
-            }
+            Log.d(TAG, "updateSongInfo received: " + (songName != null ? songName : "null"));
 
             // Update TextView
             if (songName == null || songName.isEmpty()) {
@@ -761,23 +590,31 @@ public class DreamService extends android.service.dreams.DreamService {
             } else {
                 // Format with HTML (optimized string building)
                 Spanned formattedText;
-                int newlineIndex = songName.indexOf('\\n'); // Use single quote for char
+                int newlineIndex = songName.indexOf('\n'); // Corrected: Use single quote for char literal
                 if (newlineIndex != -1) {
                     String title = songName.substring(0, newlineIndex);
                     String artist = songName.substring(newlineIndex + 1);
+                    
+                    // Capitalize first letter of title and artist
+                    String capitalizedTitle = capitalizeFirstLetter(title);
+                    String capitalizedArtist = capitalizeFirstLetter(artist);
+                    
                     // Use StringBuilder for slightly cleaner concatenation (though + is often optimized)
                     String htmlString = new StringBuilder()
                             .append("<font size=\"+4\"><b>")
-                            .append(title)
+                            .append(capitalizedTitle) // Use capitalized title
                             .append("</b></font><br>")
-                            .append(artist)
+                            .append(capitalizedArtist) // Use capitalized artist
                             .toString();
                     formattedText = DreamService.fromHtml(htmlString);
                 } else {
                     // Only one line exists, make it bold and slightly larger
+                    // Capitalize first letter if only title is present
+                    String capitalizedSongName = capitalizeFirstLetter(songName);
+                    
                     String htmlString = new StringBuilder()
                             .append("<font size=\"+4\"><b>")
-                            .append(songName)
+                            .append(capitalizedSongName) // Use capitalized song name
                             .append("</b></font>")
                             .toString();
                     formattedText = DreamService.fromHtml(htmlString);
@@ -787,15 +624,16 @@ public class DreamService extends android.service.dreams.DreamService {
                 
                 // Restore Gravity setting for center alignment
                 textView.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-                
-                // Restore other styling (size, linespacing, shadow, color) if needed
-                // textView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 20);
-                // textView.setLineSpacing(10f, 1.0f); 
-                // textView.setShadowLayer(3, 1, 1, Color.BLACK);
-                // textView.setTextColor(Color.WHITE);
-                // textView.bringToFront(); // If needed
             }
         });
+    }
+
+    // Helper function to capitalize the first letter of a string
+    private static String capitalizeFirstLetter(String str) {
+        if (str == null || str.isEmpty()) {
+            return str;
+        }
+        return str.substring(0, 1).toUpperCase() + str.substring(1);
     }
 
     @SuppressLint("SetTextI18n")
@@ -828,44 +666,42 @@ public class DreamService extends android.service.dreams.DreamService {
         });
     }
 
-    // --- Play/Pause Toggle Logic --- 
-    private void togglePlayPause() {
-        synchronized (controllerLock) {
-            if (currentMediaController == null) {
-                Log.d(TAG, "togglePlayPause: No active MediaController.");
-                return;
-            }
-
-            PlaybackState state = currentMediaController.getPlaybackState();
-            if (state == null) {
-                Log.d(TAG, "togglePlayPause: PlaybackState is null.");
-                 // Try playing anyway as a fallback?
-                 currentMediaController.getTransportControls().play();
-                return;
-            }
-
-            int currentState = state.getState();
-            Log.d(TAG, "togglePlayPause: Current state = " + currentState);
-
-            if (currentState == PlaybackState.STATE_PLAYING || 
-                currentState == PlaybackState.STATE_BUFFERING) {
-                Log.d(TAG, "Pausing media.");
-                currentMediaController.getTransportControls().pause();
-            } else if (currentState == PlaybackState.STATE_PAUSED || 
-                       currentState == PlaybackState.STATE_STOPPED || 
-                       currentState == PlaybackState.STATE_NONE) {
-                Log.d(TAG, "Playing media.");
-                currentMediaController.getTransportControls().play();
-            } else {
-                 Log.d(TAG, "MediaController in unhandled state: " + currentState);
-            }
-        }
-    }
-    // ----------------------------- 
-
     // Helper function to convert dp to pixels
     private int dpToPx(int dp) {
         float density = getResources().getDisplayMetrics().density;
         return Math.round((float) dp * density);
+    }
+
+    // Override dispatchKeyEvent to handle volume buttons
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        int action = event.getAction();
+        int keyCode = event.getKeyCode();
+
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_VOLUME_UP:
+                if (action == KeyEvent.ACTION_DOWN) {
+                    Log.d(TAG, "Volume Up Pressed - Adjusting volume manually");
+                    if (audioManager != null) {
+                        audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC,
+                                AudioManager.ADJUST_RAISE,
+                                0); // 0 flags = no UI shown by default handler
+                    }
+                }
+                return true; // Consume the event to prevent system UI
+            case KeyEvent.KEYCODE_VOLUME_DOWN:
+                if (action == KeyEvent.ACTION_DOWN) {
+                    Log.d(TAG, "Volume Down Pressed - Adjusting volume manually");
+                    if (audioManager != null) {
+                        audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC,
+                                AudioManager.ADJUST_LOWER,
+                                0); // 0 flags = no UI shown by default handler
+                    }
+                }
+                return true; // Consume the event to prevent system UI
+            default:
+                // For all other keys, let the default system handling occur
+                return super.dispatchKeyEvent(event);
+        }
     }
 }

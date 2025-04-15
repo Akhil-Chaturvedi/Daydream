@@ -367,10 +367,6 @@ public class DreamService extends android.service.dreams.DreamService {
 
     // Update methods
     private void updateTimeInWords() {
-        if (timeInWordsTextView == null) {
-            Log.e(TAG, "timeInWordsTextView is null in updateTimeInWords");
-            return; // Prevent potential NPE
-        }
         String timeInWords = getTimeInWords();
         timeInWordsTextView.setText(fromHtml(timeInWords));
     }
@@ -393,10 +389,6 @@ public class DreamService extends android.service.dreams.DreamService {
     }
 
     private void updateDayDateTextView() {
-        if (dayDateTextView == null) {
-            Log.e(TAG, "dayDateTextView is null in updateDayDateTextView");
-            return; // Prevent potential NPE
-        }
         String dayDate = getDayDate();
         dayDateTextView.setText(dayDate);
     }
@@ -408,10 +400,6 @@ public class DreamService extends android.service.dreams.DreamService {
     }
 
     private void updateBatteryInfo() {
-        if (batteryInfoTextView == null || batteryIconImageView == null) {
-            Log.e(TAG, "Battery views are null in updateBatteryInfo");
-            return; // Prevent potential NPE
-        }
         int batteryLevel = getBatteryLevel();
         batteryInfoTextView.setText(batteryLevel + "%");
         int batteryIconResId = getBatteryIconResId(batteryLevel);
@@ -602,31 +590,32 @@ public class DreamService extends android.service.dreams.DreamService {
             } else {
                 // Format with HTML (optimized string building)
                 Spanned formattedText;
-                int newlineIndex = songName.indexOf('\n'); // Corrected: Use single quote for char literal
+                int newlineIndex = songName.indexOf('\n');
                 if (newlineIndex != -1) {
                     String title = songName.substring(0, newlineIndex);
                     String artist = songName.substring(newlineIndex + 1);
-                    
-                    // Capitalize first letter of title and artist
-                    String capitalizedTitle = capitalizeFirstLetter(title);
-                    String capitalizedArtist = capitalizeFirstLetter(artist);
-                    
-                    // Use StringBuilder for slightly cleaner concatenation (though + is often optimized)
+
+                    // *** Capitalize Title and Artist ***
+                    String capitalizedTitle = capitalizeWords(title);
+                    String capitalizedArtist = capitalizeWords(artist);
+                    // **********************************
+
                     String htmlString = new StringBuilder()
                             .append("<font size=\"+4\"><b>")
-                            .append(capitalizedTitle) // Use capitalized title
+                            .append(capitalizedTitle) // Use capitalized version
                             .append("</b></font><br>")
-                            .append(capitalizedArtist) // Use capitalized artist
+                            .append(capitalizedArtist) // Use capitalized version
                             .toString();
                     formattedText = DreamService.fromHtml(htmlString);
                 } else {
-                    // Only one line exists, make it bold and slightly larger
-                    // Capitalize first letter if only title is present
-                    String capitalizedSongName = capitalizeFirstLetter(songName);
-                    
+                    // Only one line exists, treat as title
+                    // *** Capitalize Song Name (Title) ***
+                    String capitalizedTitle = capitalizeWords(songName);
+                    // ***********************************
+
                     String htmlString = new StringBuilder()
                             .append("<font size=\"+4\"><b>")
-                            .append(capitalizedSongName) // Use capitalized song name
+                            .append(capitalizedTitle) // Use capitalized version
                             .append("</b></font>")
                             .toString();
                     formattedText = DreamService.fromHtml(htmlString);
@@ -634,19 +623,28 @@ public class DreamService extends android.service.dreams.DreamService {
                 textView.setText(formattedText);
                 textView.setVisibility(View.VISIBLE);
                 
-                // Restore Gravity setting for center alignment
                 textView.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
             }
         });
     }
 
-    // Helper function to capitalize the first letter of a string
-    private static String capitalizeFirstLetter(String str) {
+    // *** Add Helper function to capitalize words ***
+    private static String capitalizeWords(String str) {
         if (str == null || str.isEmpty()) {
             return str;
         }
-        return str.substring(0, 1).toUpperCase() + str.substring(1);
+        String[] words = str.split("\\s+");
+        StringBuilder capitalizedString = new StringBuilder();
+        for (String word : words) {
+            if (word.length() > 0) {
+                capitalizedString.append(Character.toUpperCase(word.charAt(0)))
+                                 .append(word.substring(1).toLowerCase())
+                                 .append(" ");
+            }
+        }
+        return capitalizedString.toString().trim(); // Trim trailing space
     }
+    // ********************************************
 
     @SuppressLint("SetTextI18n")
     public static void updateSongCount(final int count) {

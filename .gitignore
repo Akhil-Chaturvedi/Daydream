@@ -1,15 +1,72 @@
+# ======================================================================================
+# IDE Files & User-Specific Settings
+#
+# Folders and files created by IDEs (Android Studio, IntelliJ) containing
+# user-specific settings, local history, caches, and module configurations.
+# These should never be shared in version control.
+# ======================================================================================
+.idea/
 *.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+.gradle/
 local.properties
+
+
+# ======================================================================================
+# Build Output
+#
+# Generated files from the Gradle build process. These are recreated every time
+# the project is compiled and can be very large.
+# ======================================================================================
+build/
+app/build/
+
+
+# ======================================================================================
+# Release Artifacts & Packages
+#
+# Compiled application packages (APKs, AABs) and related metadata. These should be
+# distributed via releases (e.g., GitHub Releases), not stored in source control.
+# ======================================================================================
+app/release/
+*.apk
+*.aab
+
+
+# ======================================================================================
+# Keystore Files (CRITICAL)
+#
+# !!! DANGER !!!
+# Contains your application's signing keys. If you commit and push these,
+# anyone can sign an application pretending to be you.
+# NEVER, EVER COMMIT THESE FILES TO A PUBLIC REPOSITORY.
+# ======================================================================================
+*.jks
+*.keystore
+
+
+# ======================================================================================
+# Caches & System Files
+#
+# Temporary cache files from various tools and operating systems.
+# ======================================================================================
+.kotlin/
+captures/
+.DS_Store
+
+
+# ======================================================================================
+# Native Build Files
+#
+# Generated files and caches from building native C/C++ code (NDK).
+# ======================================================================================
+.externalNativeBuild/
+.cxx/
+
+
+# ======================================================================================
+# Sensitive or Environment-Specific Files
+#
+# Files that may contain API keys or environment-specific configurations.
+# It's better to require each developer to provide their own.
+# ======================================================================================
+google-services.json

@@ -1439,7 +1439,6 @@
     <string name="app_name">DayDream</string>
     <string name="default_time_string">Time not available.</string>
     <string name="launch_daydream_settings">Launch DayDream Settings</string>
-    <string name="launch_accessibility_settings">Launch Accessibility Settings</string>
     <string name="launch_notification_settings">Launch Notification Settings</string>
     <string name="allow_write_settings">Allow Write Settings</string>
 </resources>

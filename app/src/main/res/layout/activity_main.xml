@@ -40,15 +40,6 @@
             android:text="@string/launch_daydream_settings" />
 
         <Button
-            android:id="@+id/AccessibilityButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="200dp"
-            android:layout_marginBottom="8dp"
-            android:padding="12dp"
-            android:text="@string/launch_accessibility_settings" />
-
-        <Button
             android:id="@+id/NotificationButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -56,6 +47,15 @@
             android:layout_marginBottom="8dp"
             android:padding="12dp"
             android:text="@string/launch_notification_settings" />
+
+        <Button
+            android:id="@+id/OverlayPermissionButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="200dp"
+            android:layout_marginBottom="8dp"
+            android:padding="12dp"
+            android:text="Allow Display Over Other Apps" />
 
         <Button
             android:id="@+id/WriteSystemSettings"
@@ -71,7 +71,7 @@
         android:id="@+id/endpoint"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Made with ❤ by ByteSmith."
+        android:text="Github.com/Akhil-Chaturvedi"
         android:textSize="14sp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"

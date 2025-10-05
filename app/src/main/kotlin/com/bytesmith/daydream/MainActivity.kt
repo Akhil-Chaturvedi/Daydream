@@ -1,75 +1,129 @@
+// In MainActivity.kt
+
 package com.bytesmith.daydream
+
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.TextUtils
-import android.view.View
-import android.widget.Button
 import android.widget.Toast
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import com.bytesmith.daydream.databinding.ActivityMainBinding
+
 class MainActivity : AppCompatActivity() {
-    // companion object is like a static block in Java
+
     companion object {
-        private const val WRITE_SETTINGS_REQUEST_CODE = 1000
+        const val PREFS_NAME = "DaydreamSettings"
+        const val KEY_ICON_STYLE = "notificationIconStyle"
+        const val ICON_STYLE_SYSTEM = 0
+        const val ICON_STYLE_MONOCHROME = 1
+        const val ICON_STYLE_OFF = 2
     }
+
     private var currentToast: Toast? = null
-    // 'lateinit' means we promise to initialize this variable before we use it.
-    // This avoids making it nullable (Button?) when we know it will be assigned in onCreate.
-    private lateinit var notificationButton: Button
-    private lateinit var writeSettingsButton: Button
+    private lateinit var binding: ActivityMainBinding
+
+    private lateinit var writeSettingsLauncher: ActivityResultLauncher<Intent>
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-        // Assign the views using findViewById
-        notificationButton = findViewById(R.id.NotificationButton)
-        writeSettingsButton = findViewById(R.id.WriteSystemSettings)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        writeSettingsLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (Settings.System.canWrite(this)) {
+                    showToast("Write settings permission granted!")
+                } else {
+                    showToast("Write settings permission denied.")
+                }
+                updateWriteSettingsButtonStatus()
+            }
+        }
+
         initializeButtons()
     }
+
     override fun onResume() {
         super.onResume()
-        // Update button status when returning to the activity
         updateNotificationButtonStatus()
         updateWriteSettingsButtonStatus()
+        updateIconStyleButton()
     }
+
     override fun onDestroy() {
-        // Clear toast reference
         currentToast?.cancel()
         currentToast = null
         super.onDestroy()
     }
+
     private fun initializeButtons() {
-        // Setup Screensaver Button using a Kotlin lambda for the click listener
-        setupButton(R.id.ScreensaverButton) {
+        binding.ScreensaverButton.setOnClickListener {
             launchActivityByClassName(
                 "com.android.settings",
                 "com.android.settings.Settings\$DreamSettingsActivity",
                 "Failed to open Dream settings. Please check if the settings app is available."
             )
         }
-        // Setup Notification Button
-        setupButton(R.id.NotificationButton) {
+
+        binding.NotificationButton.setOnClickListener {
             launchActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             showToast("Please enable notification access for DayDream in the list.")
         }
-        updateNotificationButtonStatus() // Initial status check
-        // Setup Write System Settings Button
-        setupButton(R.id.WriteSystemSettings) {
+        updateNotificationButtonStatus()
+
+        binding.WriteSystemSettings.setOnClickListener {
             handleWriteSettingsPermission()
         }
-        updateWriteSettingsButtonStatus() // Initial status check
+        updateWriteSettingsButtonStatus()
+
+        binding.notificationIconStyleButton.setOnClickListener {
+            cycleNotificationIconStyle()
+        }
+        updateIconStyleButton()
     }
-    private fun updateNotificationButtonStatus() {
-        if (isNotificationServiceEnabled()) {
-            notificationButton.text = "Notification Access: Granted"
-            notificationButton.isEnabled = false // Disable if granted
-        } else {
-            notificationButton.text = "Notification Access: Required"
-            notificationButton.isEnabled = true
+
+    private fun cycleNotificationIconStyle() {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val currentStyle = prefs.getInt(KEY_ICON_STYLE, ICON_STYLE_SYSTEM) // Default to System
+
+        val nextStyle = when (currentStyle) {
+            ICON_STYLE_SYSTEM -> ICON_STYLE_MONOCHROME
+            ICON_STYLE_MONOCHROME -> ICON_STYLE_OFF
+            else -> ICON_STYLE_SYSTEM // Covers OFF and any other case
+        }
+
+        prefs.edit().putInt(KEY_ICON_STYLE, nextStyle).apply()
+        updateIconStyleButton()
+    }
+
+    private fun updateIconStyleButton() {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val currentStyle = prefs.getInt(KEY_ICON_STYLE, ICON_STYLE_SYSTEM)
+
+        binding.notificationIconStyleButton.text = when (currentStyle) {
+            ICON_STYLE_SYSTEM -> "Icon Style: System"
+            ICON_STYLE_MONOCHROME -> "Icon Style: Monochrome"
+            else -> "Icon Style: Off"
         }
     }
+
+    private fun updateNotificationButtonStatus() {
+        if (isNotificationServiceEnabled()) {
+            binding.NotificationButton.text = "Notification Access: Granted"
+            binding.NotificationButton.isEnabled = false
+        } else {
+            binding.NotificationButton.text = "Notification Access: Required"
+            binding.NotificationButton.isEnabled = true
+        }
+    }
+
     private fun isNotificationServiceEnabled(): Boolean {
         val pkgName = packageName
         val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
@@ -86,34 +140,34 @@ class MainActivity : AppCompatActivity() {
         }
         return false
     }
+
     private fun updateWriteSettingsButtonStatus() {
         if (canWriteSettings()) {
-            writeSettingsButton.text = "Write Settings: Granted"
-            writeSettingsButton.isEnabled = false // Disable if granted
+            binding.WriteSystemSettings.text = "Write Settings: Granted"
+            binding.WriteSystemSettings.isEnabled = false
         } else {
-            writeSettingsButton.text = "Write Settings: Required"
-            writeSettingsButton.isEnabled = true
+            binding.WriteSystemSettings.text = "Write Settings: Required"
+            binding.WriteSystemSettings.isEnabled = true
         }
     }
+
     private fun canWriteSettings(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             Settings.System.canWrite(this)
         } else {
-            true // Not needed below Marshmallow
+            true
         }
     }
-    // A higher-order function that takes a click listener lambda
-    private fun setupButton(buttonId: Int, clickListener: (View) -> Unit) {
-        findViewById<Button>(buttonId)?.setOnClickListener(clickListener)
-    }
+    
     private fun launchActivity(intent: Intent) {
         try {
             startActivity(intent)
         } catch (e: Exception) {
             e.printStackTrace()
-            showToast("Failed to launch activity: ${e.message}") // String templates
+            showToast("Failed to launch activity: ${e.message}")
         }
     }
+
     private fun launchActivityByClassName(packageName: String, className: String, errorMessage: String) {
         val intent = Intent().apply {
             setClassName(packageName, className)
@@ -125,15 +179,15 @@ class MainActivity : AppCompatActivity() {
             showToast(errorMessage)
         }
     }
+
     private fun handleWriteSettingsPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!Settings.System.canWrite(this)) {
                 val intent = Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS).apply {
                     data = Uri.parse("package:$packageName")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 try {
-                    startActivityForResult(intent, WRITE_SETTINGS_REQUEST_CODE)
+                    writeSettingsLauncher.launch(intent)
                 } catch (e: Exception) {
                     showToast("Could not request permission: ${e.message}")
                 }
@@ -144,23 +198,9 @@ class MainActivity : AppCompatActivity() {
             showToast("Write settings permission is not required on this Android version.")
         }
     }
-    // Note: onActivityResult is deprecated, but we keep it for this example
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == WRITE_SETTINGS_REQUEST_CODE) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                if (Settings.System.canWrite(this)) {
-                    showToast("Write settings permission granted!")
-                } else {
-                    showToast("Write settings permission denied.")
-                }
-            }
-        }
-    }
+
     private fun showToast(message: String) {
-        // Cancel any existing toast to prevent stacking
         currentToast?.cancel()
-        // Create and show new toast
         currentToast = Toast.makeText(this, message, Toast.LENGTH_LONG).apply {
             show()
         }

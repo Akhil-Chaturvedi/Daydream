@@ -17,10 +17,13 @@ import android.graphics.PorterDuffColorFilter
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.media.AudioManager
+import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Parcelable
+import android.provider.Settings
+import android.text.SpannableString
 import android.text.Spanned
 import android.text.TextUtils
 import android.util.Log
@@ -48,6 +51,7 @@ class DreamService : android.service.dreams.DreamService() {
 
     private lateinit var binding: ActivityScreensaverBinding
     private val dreamServiceScope = CoroutineScope(Dispatchers.Main + Job())
+    private var isCleaningUp = false
     private lateinit var audioManager: AudioManager
     private lateinit var songGestureDetector: GestureDetector
     private var canvasArtCacheDir: File? = null
@@ -63,6 +67,7 @@ class DreamService : android.service.dreams.DreamService() {
     private val ICON_STYLE_MONOCHROME = 1
     private val ICON_STYLE_OFF = 2
     private var currentIconStyle = ICON_STYLE_SYSTEM
+    private var originalAutoRotate = -1
     private val memoryCache: LruCache<String, Bitmap>
 
     init {
@@ -133,10 +138,12 @@ class DreamService : android.service.dreams.DreamService() {
                     val htmlString = "<b><font size='+4'>${escapeHtml(capitalizeWords(songName))}</font></b>"
                     fromHtml(htmlString)
                 }
-                textView.text = formattedText
+                // Apply extra boldness to the formatted text
+                val finalText = instance.applyExtraBoldness(formattedText)
+                textView.text = finalText
                 textView.visibility = View.VISIBLE
                 textView.gravity = android.view.Gravity.CENTER_HORIZONTAL
-                lastValidSongInfoHtml = formattedText
+                lastValidSongInfoHtml = finalText
             } else {
                 if (lastValidSongInfoHtml != null) {
                     textView.text = lastValidSongInfoHtml
@@ -185,6 +192,22 @@ class DreamService : android.service.dreams.DreamService() {
         registerReceiver(updateNotificationReceiver, IntentFilter(NotificationService.UPDATE_NOTIFICATIONS_ACTION))
         registerReceiver(mediaMetadataReceiver, IntentFilter(NotificationService.MEDIA_METADATA_UPDATED_ACTION))
 
+        // Enable auto-rotate if it was off
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (!Settings.System.canWrite(this)) {
+                // Prompt user to grant write settings permission if not already granted
+                val intent = Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS)
+                    .setData(Uri.parse("package:$packageName"))
+                startActivity(intent)
+                return  // Optionally handle this better; for now, exit early if permission not granted
+            }
+        }
+        originalAutoRotate = Settings.System.getInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, 1)
+        if (originalAutoRotate == 0) {
+            Settings.System.putInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, 1)
+            Log.d(TAG, "Temporarily enabled auto-rotate for screensaver")
+        }
+
         setupUi()
         populateUi()
         startPeriodicUpdates()
@@ -208,24 +231,42 @@ class DreamService : android.service.dreams.DreamService() {
         adjustBrightness(10)
         setSystemUiVisibility()
 
+        // 1. Initialize the single gesture detector for all media controls.
+        songGestureDetector = GestureDetector(this@DreamService, SongGestureListener())
+        val songTouchListener = View.OnTouchListener { _, event -> songGestureDetector.onTouchEvent(event) }
+
+        // 2. Apply the gesture listener to the song details text view.
         binding.songName.apply {
             visibility = View.GONE
             isClickable = true
             isFocusable = true
-            songGestureDetector = GestureDetector(this@DreamService, SongGestureListener())
-            setOnTouchListener { _, event -> songGestureDetector.onTouchEvent(event) }
+            setOnTouchListener(songTouchListener)
         }
+
+        // 3. Apply the SAME gesture listener to the album art image view.
+        binding.canvasArtImageview.apply {
+            isClickable = true
+            isFocusable = true
+            setOnTouchListener(songTouchListener)
+        }
+
+        // 4. This detector handles exiting the screensaver on a double-tap on the background.
         val exitGestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                finish()
+                exitDream()
                 return true
             }
+            // This ensures the exit detector only acts on touches OUTSIDE our interactive media controls.
             override fun onDown(e: MotionEvent): Boolean {
-                return !isPointInsideView(e.rawX, e.rawY, binding.songName)
+                val isTouchingSongName = isPointInsideView(e.rawX, e.rawY, binding.songName)
+                val isTouchingAlbumArt = isPointInsideView(e.rawX, e.rawY, binding.canvasArtImageview)
+                return !isTouchingSongName && !isTouchingAlbumArt
             }
         })
+
+        // 5. The root view's touch listener now cleanly passes all background touches to the exit detector.
         window.decorView.setOnTouchListener { _, event ->
-            exitGestureDetector.onTouchEvent(event) || !isPointInsideView(event.rawX, event.rawY, binding.songName)
+            exitGestureDetector.onTouchEvent(event)
         }
 
         window.decorView.removeOnLayoutChangeListener(layoutChangeListener)
@@ -279,17 +320,51 @@ class DreamService : android.service.dreams.DreamService() {
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        // This is the system's standard exit path. Ensure cleanup is performed.
+        performCleanup()
+    }
+
+    private fun performCleanup() {
+        // Use a flag to ensure this block of code only ever runs once.
+        if (isCleaningUp) return
+        isCleaningUp = true
+
+        Log.d(TAG, "Performing dream cleanup...")
+
         NotificationService.setDreamActive(false)
         dreamServiceScope.cancel()
         restoreBrightness()
-        window.decorView.removeOnLayoutChangeListener(layoutChangeListener)
+        if (window != null) {
+            window.decorView.removeOnLayoutChangeListener(layoutChangeListener)
+            window.decorView.setOnTouchListener(null)
+        }
         try {
             unregisterReceiver(updateNotificationReceiver)
             unregisterReceiver(mediaMetadataReceiver)
         } catch (e: IllegalArgumentException) {
-            Log.w(TAG, "Receivers not registered, skipping unregister.")
+            Log.w(TAG, "Receivers not registered during cleanup, skipping unregister.")
         }
-        window.decorView.setOnTouchListener(null)
+
+        // Restore original auto-rotate setting if we changed it
+        if (originalAutoRotate == 0) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.System.canWrite(this)) {
+                Settings.System.putInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, 0)
+                Log.d(TAG, "Restored original auto-rotate setting (disabled)")
+            } else {
+                Log.w(TAG, "Could not restore auto-rotate: Write Settings permission not granted.")
+            }
+        }
+    }
+
+    private fun exitDream() {
+        // 1. Immediately tell the system to finish. The UI will disappear now.
+        finish()
+
+        // 2. Launch a coroutine to handle the cleanup tasks in the background
+        //    without delaying the UI transition.
+        CoroutineScope(Dispatchers.Main).launch {
+            performCleanup()
+        }
     }
 
     override fun onDreamingStarted() {
@@ -300,6 +375,57 @@ class DreamService : android.service.dreams.DreamService() {
         binding.root.postDelayed({
             restoreUiState()
         }, 100)
+    }
+
+    /**
+     * A custom character style to apply a "faux bold" effect by adding a stroke.
+     * This makes text appear heavier when layered on top of an existing bold style.
+     */
+    private class FauxBoldSpan : android.text.style.CharacterStyle(), android.text.style.UpdateAppearance {
+        override fun updateDrawState(tp: android.text.TextPaint) {
+            // Use a stroke width proportional to the text size for a consistent effect.
+            val fauxBoldStrokeWidth = tp.textSize / 36f
+            tp.style = android.graphics.Paint.Style.FILL_AND_STROKE
+            tp.strokeWidth = fauxBoldStrokeWidth
+        }
+    }
+
+    /**
+     * Checks if the system-wide "Bold text" accessibility setting is enabled.
+     * NOTE: This is only reliably detectable on Android 12 (API 31) and newer.
+     */
+    private fun isSystemBoldEnabled(): Boolean {
+        // fontWeightAdjustment is the reliable way to check, available from API 31.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // A value of 300 or higher is typically used when bold text is enabled.
+            return resources.configuration.fontWeightAdjustment >= 300
+        }
+        // No reliable public API exists for this on older Android versions.
+        return false
+    }
+
+    /**
+     * Augments a Spanned text by making already-bold sections even bolder.
+     * It finds existing bold StyleSpans and applies a FauxBoldSpan on top of them.
+     */
+    private fun applyExtraBoldness(spanned: Spanned): Spanned {
+        if (!isSystemBoldEnabled()) {
+            return spanned // Do nothing if system bold is off.
+        }
+
+        val spannable = SpannableString(spanned)
+        // Find all StyleSpans that were created from the <b> tags.
+        val boldSpans = spannable.getSpans(0, spannable.length, android.text.style.StyleSpan::class.java)
+            .filter { it.style == android.graphics.Typeface.BOLD }
+
+        for (span in boldSpans) {
+            val start = spannable.getSpanStart(span)
+            val end = spannable.getSpanEnd(span)
+            // Layer our custom faux bold effect on top of the existing bold style.
+            spannable.setSpan(FauxBoldSpan(), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+
+        return spannable
     }
 
     private val mediaMetadataReceiver = object : BroadcastReceiver() {
@@ -387,6 +513,10 @@ class DreamService : android.service.dreams.DreamService() {
                 } else {
                     dispatchMediaKeyEvent(KeyEvent.KEYCODE_MEDIA_NEXT)
                 }
+
+                binding.songName.visibility = View.GONE
+                binding.canvasArtImageview.setImageBitmap(null)
+
                 return true
             }
             return false
@@ -439,7 +569,9 @@ class DreamService : android.service.dreams.DreamService() {
     }
 
     private fun updateTimeInWords() {
-        binding.timeInWords.text = fromHtml(getTimeInWords())
+        val timeInWordsHtml = fromHtml(getTimeInWords())
+        // Apply extra boldness if the system setting is on
+        binding.timeInWords.text = applyExtraBoldness(timeInWordsHtml)
     }
 
     private fun getTimeInWords(): String {

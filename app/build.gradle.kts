@@ -91,12 +91,15 @@ android {
             // Exclusions removed to allow libopencv_java4.so to be packaged.
         }
     }
+}
 
-    applicationVariants.all {
-        outputs.all {
-            val output = this as com.android.build.gradle.api.BaseVariantOutput
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            val outputImpl = output as com.android.build.api.variant.impl.VariantOutputImpl
+            val versionName = variant.versionName.get() ?: "1.0"
             val newName = "Daydream_${versionName.replace('.', '-')}.apk"
-            output.outputFileName = newName
+            outputImpl.outputFileName.set(newName)
         }
     }
 }

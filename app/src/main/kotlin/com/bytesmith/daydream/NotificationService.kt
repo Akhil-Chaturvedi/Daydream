@@ -274,6 +274,7 @@ class NotificationService : NotificationListenerService() {
         handlePlaybackStateChange(playbackState, controllerPackage, metadata)
     }
 
+    @Suppress("DEPRECATION")
     private fun handlePlaybackStateChange(state: PlaybackState?, packageName: String, metadata: MediaMetadata?) {
         val currentTime = System.currentTimeMillis()
         val currentSongId = metadata?.let { buildSongId(it) }
@@ -310,13 +311,16 @@ class NotificationService : NotificationListenerService() {
                     if (albumArt == null) {
                         val sbn = activeNotifications.firstOrNull { it.key == mediaNotificationKey }
                         if (sbn != null) {
-
+                            // On modern APIs (M+), the large icon is an `Icon` parcelable.
+                            // The old EXTRA_LARGE_ICON, which returned a Bitmap, is deprecated.
+                            // We now correctly use the same key, but expect an Icon object.
+                            // We prioritize EXTRA_LARGE_ICON_BIG as it's for the expanded notification.
                             val iconParcelable = getParcelableCompat(
-                                sbn.notification?.extras ?: Bundle.EMPTY,
+                                sbn.notification?.extras ?: Bundle.EMPTY, // Prioritize the expanded view icon
                                 Notification.EXTRA_LARGE_ICON_BIG,
                                 Parcelable::class.java
                             ) ?: getParcelableCompat(
-                                sbn.notification?.extras ?: Bundle.EMPTY,
+                                sbn.notification?.extras ?: Bundle.EMPTY, // Fallback to the standard large icon
                                 Notification.EXTRA_LARGE_ICON,
                                 Parcelable::class.java
                             )
@@ -324,14 +328,14 @@ class NotificationService : NotificationListenerService() {
                             when (iconParcelable) {
                                 is Bitmap -> {
                                     albumArt = iconParcelable
-                                    Log.d(TAG, "Extracted art via EXTRA_LARGE_ICON (was a Bitmap)")
+                                    Log.d(TAG, "Extracted art via EXTRA_LARGE_ICON (was a legacy Bitmap)")
                                 }
                                 is Icon -> {
                                     albumArt = drawableToBitmap(iconParcelable.loadDrawable(this))
-                                    Log.d(TAG, "Extracted art via EXTRA_LARGE_ICON (was an Icon, converted successfully)")
+                                    Log.d(TAG, "Extracted art via modern EXTRA_LARGE_ICON (was an Icon, converted successfully)")
                                 }
                                 else -> {
-                                    Log.d(TAG, "Icon object found but was neither Bitmap nor Icon.")
+                                    Log.w(TAG, "Large icon object found but was of an unexpected type: ${iconParcelable?.javaClass?.name}")
                                 }
                             }
                         }
@@ -361,7 +365,7 @@ class NotificationService : NotificationListenerService() {
             }
         }
     }
-
+    
     private fun <T : Parcelable> getParcelableCompat(bundle: Bundle, key: String, clazz: Class<T>): T? {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             bundle.getParcelable(key, clazz)

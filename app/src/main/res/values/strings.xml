@@ -59,7 +59,7 @@
     <string name="time_12_57_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;Three&lt;/b&gt; minutes to &lt;br/&gt;&lt;b&gt;One&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
     <string name="time_12_58_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;Two&lt;/b&gt; minutes to &lt;br/&gt;&lt;b&gt;One&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
     <string name="time_12_59_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;One&lt;/b&gt; minute to &lt;br/&gt;&lt;b&gt;One&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
-    <string name="time_01_00_AM">                                      </string>
+    <string name="time_01_00_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;One&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;, precisely.</string>
     <string name="time_01_01_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;One&lt;/b&gt; minute past &lt;br/&gt;&lt;b&gt;One&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
     <string name="time_01_02_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;Two&lt;/b&gt; minutes past &lt;br/&gt;&lt;b&gt;One&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
     <string name="time_01_03_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;Three&lt;/b&gt; minutes past &lt;br/&gt;&lt;b&gt;One&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
@@ -118,6 +118,8 @@
     <string name="time_01_56_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;Four&lt;/b&gt; minutes to &lt;br/&gt;&lt;b&gt;Two&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
     <string name="time_01_57_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;Three&lt;/b&gt; minutes to &lt;br/&gt;&lt;b&gt;Two&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
     <string name="time_01_58_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;Two&lt;/b&gt; minutes to &lt;br/&gt;&lt;b&gt;Two&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
+	<string name="time_01_59_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;One&lt;/b&gt; minute to &lt;br/&gt;&lt;b&gt;Two&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
+	<string name="time_02_00_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;Two&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;, precisely.</string>
     <string name="time_02_01_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;One&lt;/b&gt; minute past &lt;br/&gt;&lt;b&gt;Two&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
     <string name="time_02_02_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;Two&lt;/b&gt; minutes past &lt;br/&gt;&lt;b&gt;Two&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
     <string name="time_02_03_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;Three&lt;/b&gt; minutes past &lt;br/&gt;&lt;b&gt;Two&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
@@ -178,6 +180,7 @@
     <string name="time_02_58_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;Two&lt;/b&gt; minutes to &lt;br/&gt;&lt;b&gt;Three&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
     <string name="time_02_59_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;One&lt;/b&gt; minute to &lt;br/&gt;&lt;b&gt;Three&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
     <string name="time_03_00_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;Three&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;, precisely.</string>
+	<string name="time_03_01_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;One&lt;/b&gt; minute past &lt;br/&gt;&lt;b&gt;Three&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
     <string name="time_03_02_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;Two&lt;/b&gt; minutes past &lt;br/&gt;&lt;b&gt;Three&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
     <string name="time_03_03_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;Three&lt;/b&gt; minutes past &lt;br/&gt;&lt;b&gt;Three&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>
     <string name="time_03_04_AM">&lt;b&gt;It\'s&lt;/b&gt; &lt;br/&gt;&lt;b&gt;Four&lt;/b&gt; minutes past &lt;br/&gt;&lt;b&gt;Three&lt;/b&gt;, in the &lt;b&gt;morning&lt;/b&gt;.</string>

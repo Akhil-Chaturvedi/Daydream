@@ -1,5 +1,8 @@
 // C:\Users\Electrobot\AndroidStudioProjects\Daydream\app\build.gradle.kts
 
+import java.io.File
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -9,11 +12,26 @@ android {
     namespace = "com.bytesmith.daydream"
     compileSdk = 34
 
+    signingConfigs {
+        create("release") {
+            val keystoreBase64 = System.getenv("KEYSTORE_BASE64")
+            if (keystoreBase64 != null) {
+                val keystoreFile = File(project.rootDir, "release.keystore")
+                keystoreFile.writeBytes(Base64.getDecoder().decode(keystoreBase64))
+                
+                storeFile = keystoreFile
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     defaultConfig {
         applicationId = "com.bytesmith.daydream"
         minSdk = 21
         targetSdk = 34
-        versionCode = 1
+        versionCode = 3
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -31,6 +49,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
         
         debug {
@@ -48,7 +67,6 @@ android {
         jvmTarget = "17"
     }
 
-    // 1. ENABLED VIEW BINDING
     buildFeatures {
         viewBinding = true
     }
@@ -73,7 +91,6 @@ android {
             // Exclusions removed to allow libopencv_java4.so to be packaged.
         }
     }
-
 }
 
 dependencies {

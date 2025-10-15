@@ -31,7 +31,7 @@ android {
         applicationId = "com.bytesmith.daydream"
         minSdk = 21
         targetSdk = 34
-        versionCode = 2
+        versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -94,12 +94,10 @@ android {
 }
 
 androidComponents {
-    onVariants { variant ->
-        variant.outputs.forEach { output ->
-            val outputImpl = output as com.android.build.api.variant.impl.VariantOutputImpl
-            val versionName = variant.versionName.get() ?: "1.0"
-            val newName = "Daydream_${versionName.replace('.', '-')}.apk"
-            outputImpl.outputFileName.set(newName)
+    onVariants(selector().all()) { variant ->
+        variant.onProperties {
+            // The correct property is 'archivesBaseName'
+            archivesBaseName.set("Daydream_${variant.versionName}")
         }
     }
 }

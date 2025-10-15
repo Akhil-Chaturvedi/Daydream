@@ -1,6 +1,7 @@
 // C:\Users\Electrobot\AndroidStudioProjects\Daydream\app\build.gradle.kts
 
 import java.io.File
+import java.util.Base64
 
 plugins {
     id("com.android.application")
@@ -16,7 +17,7 @@ android {
             val keystoreBase64 = System.getenv("KEYSTORE_BASE64")
             if (keystoreBase64 != null) {
                 val keystoreFile = File(project.rootDir, "release.keystore")
-                keystoreFile.writeBytes(java.util.Base64.getDecoder().decode(keystoreBase64))
+                keystoreFile.writeBytes(Base64.getDecoder().decode(keystoreBase64))
                 
                 storeFile = keystoreFile
                 storePassword = System.getenv("KEYSTORE_PASSWORD")
@@ -30,7 +31,7 @@ android {
         applicationId = "com.bytesmith.daydream"
         minSdk = 21
         targetSdk = 34
-        versionCode = 2
+        versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -93,8 +94,9 @@ android {
 
     applicationVariants.all {
         outputs.all {
+            val output = this as com.android.build.gradle.api.BaseVariantOutput
             val newName = "Daydream_${versionName.replace('.', '-')}.apk"
-            (this as com.android.build.gradle.api.BaseVariantOutput).outputFileName = newName
+            output.outputFileName = newName
         }
     }
 }

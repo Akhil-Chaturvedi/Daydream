@@ -49,7 +49,7 @@ jobs:
           echo "new_version_tag=v${NEW_VERSION_NAME}" >> $GITHUB_OUTPUT
           
           git add $GRADLE_FILE
-          git commit -m "ci: Bump version to $NEW_VERSION_NAME ($NEW_VERSION_CODE) [skip ci]"
+          git commit -m "ci: Bump version to $NEW_VERSION_NAME ($NEW_VERSION_CODE)"
           git push
 
       - name: Build release APK

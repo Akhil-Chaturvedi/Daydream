@@ -1,0 +1,71 @@
+# .github/workflows/android-release.yml
+
+name: Android CI - Build and Release
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Bump version and push changes
+        id: version_bumper
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'github-actions@github.com'
+          
+          # Since this is a .kts file, we need to adjust the grep patterns slightly
+          GRADLE_FILE="app/build.gradle.kts"
+          
+          CURRENT_VERSION_CODE=$(grep 'versionCode = ' $GRADLE_FILE | awk '{print $3}')
+          CURRENT_VERSION_NAME=$(grep 'versionName = "' $GRADLE_FILE | sed 's/versionName = "//' | sed 's/"//')
+          
+          NEW_VERSION_NAME=$(echo $CURRENT_VERSION_NAME | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g')
+          NEW_VERSION_CODE=$((CURRENT_VERSION_CODE + 1))
+          
+          sed -i "s/versionCode = $CURRENT_VERSION_CODE/versionCode = $NEW_VERSION_CODE/" $GRADLE_FILE
+          sed -i "s/versionName = \"$CURRENT_VERSION_NAME\"/versionName = \"$NEW_VERSION_NAME\"/" $GRADLE_FILE
+          
+          echo "new_version_tag=v${NEW_VERSION_NAME}" >> $GITHUB_OUTPUT
+          
+          git add $GRADLE_FILE
+          git commit -m "ci: Bump version to $NEW_VERSION_NAME ($NEW_VERSION_CODE) [skip ci]"
+          git push
+
+      - name: Build release APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version_bumper.outputs.new_version_tag }}
+          name: Release ${{ steps.version_bumper.outputs.new_version_tag }}
+          body: |
+            ${{ github.event.head_commit.message }}
+          files: |
+            app/build/outputs/apk/release/*.apk

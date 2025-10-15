@@ -77,7 +77,7 @@ object CanvasGenerator {
             // 2. SUBJECT MASKING (Improved with GrabCut)
             val faceRects = detectAllFaces(grayMat)
             Log.d(TAG, "Faces detected: ${faceRects.size}")
-            val subjectMask = createSubjectMaskWithGrabCut(srcMat, grayMat, faceRects)
+            val subjectMask = createSubjectMaskWithGrabCut(srcMat, faceRects)
             allMats.add(subjectMask)
 
             // 3. ARTISTIC SMOOTHING (The Kuwahara Filter)
@@ -216,7 +216,7 @@ object CanvasGenerator {
     }
 
     // Improved: Subject Mask with GrabCut
-    private fun createSubjectMaskWithGrabCut(srcMat: Mat, grayMat: Mat, faceRects: List<Rect>): Mat {
+    private fun createSubjectMaskWithGrabCut(srcMat: Mat, faceRects: List<Rect>): Mat {
         val mask = Mat.zeros(srcMat.size(), CvType.CV_8UC1)
         val bgdModel = Mat(1, 65, CvType.CV_64FC1, Scalar(0.0))
         val fgdModel = Mat(1, 65, CvType.CV_64FC1, Scalar(0.0))

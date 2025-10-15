@@ -80,7 +80,7 @@
         android:id="@+id/endpoint"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Github.com/Akhil-Chaturvedi"
+        android:text="github.com/akhil-chaturvedi"
         android:textSize="14sp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"

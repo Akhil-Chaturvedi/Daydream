@@ -1,5 +1,7 @@
 // C:\Users\Electrobot\AndroidStudioProjects\Daydream\app\build.gradle.kts
 
+import java.io.File
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -8,6 +10,21 @@ plugins {
 android {
     namespace = "com.bytesmith.daydream"
     compileSdk = 34
+
+    signingConfigs {
+        create("release") {
+            val keystoreBase64 = System.getenv("KEYSTORE_BASE64")
+            if (keystoreBase64 != null) {
+                val keystoreFile = File(project.rootDir, "release.keystore")
+                keystoreFile.writeBytes(java.util.Base64.getDecoder().decode(keystoreBase64))
+                
+                storeFile = keystoreFile
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "com.bytesmith.daydream"
@@ -31,6 +48,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
         
         debug {
@@ -48,7 +66,6 @@ android {
         jvmTarget = "17"
     }
 
-    // 1. ENABLED VIEW BINDING
     buildFeatures {
         viewBinding = true
     }
@@ -74,6 +91,12 @@ android {
         }
     }
 
+    applicationVariants.all {
+        outputs.all {
+            val newName = "Daydream_${versionName.replace('.', '-')}.apk"
+            (this as com.android.build.gradle.api.BaseVariantOutput).outputFileName = newName
+        }
+    }
 }
 
 dependencies {

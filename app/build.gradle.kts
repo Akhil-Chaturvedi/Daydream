@@ -31,7 +31,7 @@ android {
         applicationId = "com.bytesmith.daydream"
         minSdk = 21
         targetSdk = 34
-        versionCode = 2
+        versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -93,14 +93,7 @@ android {
     }
 }
 
-androidComponents {
-    onVariants(selector().all()) { variant ->
-        variant.onProperties {
-            // The correct property is 'archivesBaseName'
-            archivesBaseName.set("Daydream_${variant.versionName}")
-        }
-    }
-}
+// The problematic androidComponents block has been removed for now.
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")

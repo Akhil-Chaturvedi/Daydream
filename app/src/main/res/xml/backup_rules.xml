@@ -8,7 +8,6 @@
     <include domain="sharedpref" path="daydream_settings.xml"/>
     <include domain="sharedpref" path="DaydreamSettings.xml"/>
     
-    <!-- Exclude runtime/cache data -->
-    <exclude domain="sharedpref" path="MediaPlaybackPrefs.xml"/>
-    <exclude domain="cache" path="."/>
+    <!-- Cache directories are excluded from backup by default -->
+    <!-- MediaPlaybackPrefs.xml is not included above, so it is already excluded -->
 </full-backup-content>

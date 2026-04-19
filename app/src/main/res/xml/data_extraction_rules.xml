@@ -8,13 +8,12 @@
         <!-- Include user settings -->
         <include domain="sharedpref" path="daydream_settings.xml"/>
         <include domain="sharedpref" path="DaydreamSettings.xml"/>
-        <!-- Exclude runtime data -->
-        <exclude domain="sharedpref" path="MediaPlaybackPrefs.xml"/>
-        <exclude domain="cache" path="."/>
+        <!-- Cache directories are excluded from backup by default -->
+        <!-- MediaPlaybackPrefs.xml is not included above, so it is already excluded -->
     </cloud-backup>
     <device-transfer>
         <include domain="sharedpref" path="daydream_settings.xml"/>
         <include domain="sharedpref" path="DaydreamSettings.xml"/>
-        <exclude domain="cache" path="."/>
+        <!-- Cache directories are excluded from backup by default -->
     </device-transfer>
 </data-extraction-rules>

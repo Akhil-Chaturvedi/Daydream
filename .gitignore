@@ -70,3 +70,7 @@ captures/
 # It's better to require each developer to provide their own.
 # ======================================================================================
 google-services.json
+
+# === Context Snapshot Files ===
+project_context.txt
+.contextignore

@@ -80,15 +80,8 @@ android {
         }
     }
 
-    sourceSets {
-        getByName("main") {
-            jniLibs.srcDirs("src/main/jniLibs")
-        }
-    }
-    
     packaging {
         jniLibs {
-            // Exclusions removed to allow libopencv_java4.so to be packaged.
         }
     }
 }
@@ -97,12 +90,12 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
+    implementation("androidx.preference:preference-ktx:1.2.1")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.annotation:annotation:1.7.1")
     implementation("androidx.activity:activity-ktx:1.9.0")
-    implementation(mapOf("name" to "opencv-minimal-4.12.0", "ext" to "aar"))
+    implementation("jp.co.cyberagent.android:gpuimage:2.1.0")
     implementation("androidx.lifecycle:lifecycle-runtime:2.6.2")
-    implementation("androidx.lifecycle:lifecycle-common-java8:2.6.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
     testImplementation("junit:junit:4.13.2")

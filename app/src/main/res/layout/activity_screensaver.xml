@@ -62,14 +62,13 @@
             android:layout_height="@dimen/notification_icon_container_height"
             android:layout_marginTop="@dimen/margin_top_notification_icons"
             android:orientation="horizontal" />
-
     </LinearLayout>
 
     <View
         android:id="@+id/center_anchor"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_centerHorizontal="true" />
+        android:layout_centerInParent="true" />
 
     <ImageView
         android:id="@+id/canvas_art_imageview"
@@ -87,10 +86,9 @@
         android:id="@+id/song_name"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="15dp"
         android:clickable="true"
         android:focusable="true"
-        android:gravity="center"
+        android:gravity="center_horizontal"
         android:padding="10dp"
         android:shadowColor="#000000"
         android:shadowDx="1"

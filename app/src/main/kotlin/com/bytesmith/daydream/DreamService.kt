@@ -5,7 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.PackageManager
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -17,62 +17,85 @@ import android.graphics.PorterDuffColorFilter
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.media.AudioManager
-import android.net.Uri
-import android.os.BatteryManager
-import android.os.Build
 import android.os.Bundle
-import android.os.Parcelable
-import android.provider.Settings
-import android.text.SpannableString
 import android.text.Spanned
 import android.text.TextUtils
 import android.util.Log
-import android.view.*
+import android.view.GestureDetector
+import android.view.KeyEvent
+import android.view.LayoutInflater
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RelativeLayout
+import android.widget.TextView
 import androidx.collection.LruCache
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.toBitmap
-import androidx.core.text.HtmlCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.bytesmith.daydream.databinding.ActivityScreensaverBinding
 import kotlinx.coroutines.*
+// import org.opencv.android.OpenCVLoader  // COMMENTED OUT - Using GPUImage instead
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.lang.ref.WeakReference
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.random.Random
+import java.util.concurrent.ConcurrentHashMap
 
+/**
+ * DreamService - Main entry point for the Daydream screensaver.
+ * 
+ * Refactored from ~1016 lines to use dedicated helper classes:
+ * - AnimationController: Handles all animation logic
+ * - LayoutManager: Handles layout calculations and positioning
+ * - MediaSessionHandler: Handles media display and caching
+ * - BatteryMonitor: Handles battery status display
+ * - GestureHandler: Handles touch gestures and key events
+ * 
+ * This class now serves as a coordinator/facade.
+ */
 class DreamService : android.service.dreams.DreamService() {
 
     private lateinit var binding: ActivityScreensaverBinding
-    private val dreamServiceScope = CoroutineScope(Dispatchers.Main + Job())
+    private val dreamServiceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var isCleaningUp = false
+    private var isReceiverRegistered = false
+
     private lateinit var audioManager: AudioManager
     private lateinit var songGestureDetector: GestureDetector
+
     private var canvasArtCacheDir: File? = null
-    private var fixedHorizontalMargin = 0
     private var iconCacheDir: File? = null
-    private var maxVerticalMargin = 0
-    private var isFirstLayoutComplete = false
-    private var isLandscape = false
-    private var lastScreenWidth = 0
-    private var lastScreenHeight = 0
-    private val iconCache = mutableMapOf<String, Drawable>()
-    private val ICON_STYLE_SYSTEM = 0
-    private val ICON_STYLE_MONOCHROME = 1
-    private val ICON_STYLE_OFF = 2
-    private var currentIconStyle = ICON_STYLE_SYSTEM
-    private var originalAutoRotate = -1
+
+    // Helper controllers
+    private lateinit var animationController: AnimationController
+    private lateinit var layoutManager: LayoutManager
+    private lateinit var mediaSessionHandler: MediaSessionHandler
+    private lateinit var batteryMonitor: BatteryMonitor
+    private lateinit var gestureHandler: GestureHandler
+
+    // Layout State (fixedHorizontalMargin used directly; other layout state delegated to LayoutManager)
+    private var fixedHorizontalMargin = 0
+
+    // Data State
+    private var songCount = 0
+    private var lastValidSongInfoHtml: Spanned? = null
+
+    // Icon display
+    private val iconCache = ConcurrentHashMap<String, Drawable>()
+    private var currentIconStyle = IconStyle.SYSTEM
+
+    // Memory cache for canvas art
     private val memoryCache: LruCache<String, Bitmap>
 
     init {
         val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
-        val cacheSize = maxMemory / 8
+        val cacheSize = maxMemory / DaydreamSettings.Layout.DEFAULT_MEMORY_CACHE_DIVISOR
         memoryCache = object : LruCache<String, Bitmap>(cacheSize) {
             override fun sizeOf(key: String, bitmap: Bitmap): Int {
                 return bitmap.byteCount / 1024
@@ -80,85 +103,20 @@ class DreamService : android.service.dreams.DreamService() {
         }
     }
 
-    private fun <T : Parcelable> getParcelableCompat(bundle: Bundle, key: String, clazz: Class<T>): T? {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            bundle.getParcelable(key, clazz)
-        } else {
-            @Suppress("DEPRECATION", "UNCHECKED_CAST")
-            bundle.getParcelable(key) as? T
-        }
-    }
-
+    // Layout change listener
     private val layoutChangeListener = View.OnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
         val newWidth = right - left
         val newHeight = bottom - top
-        if (newWidth != lastScreenWidth || newHeight != lastScreenHeight) {
+        if (layoutManager.onScreenSizeChanged(newWidth, newHeight)) {
             Log.d(TAG, "Screen dimensions changed. Recalculating bounds...")
-            lastScreenWidth = newWidth
-            lastScreenHeight = newHeight
-            updateBoundsAndLayout()
-            restoreUiState()  // Added this to restore UI after bounds update
+            updateBoundsAndLayout(forceUpdateScale = true, shouldMove = true)
         }
     }
 
     companion object {
-        private const val TAG = "DreamService"
-        private const val UPDATE_INTERVAL = 1000L
-        private const val BATTERY_UPDATE_INTERVAL = 60000L
-        private const val SHIFT_DURATION = 10000L
-        private var instanceRef: WeakReference<DreamService>? = null
-        private var songCount = 0
-        private var lastValidSongInfoHtml: Spanned? = null
+        private const val TAG = "Daydream"
         private val TIME_WORDS_FORMAT = SimpleDateFormat("hh_mm_a", Locale.getDefault())
         private val DAY_DATE_FORMAT = SimpleDateFormat("EEEE, MMM d", Locale.getDefault())
-
-        init {
-            try {
-                System.loadLibrary("opencv_java4")
-                Log.d(TAG, "OpenCV native library loaded successfully via System.loadLibrary.")
-            } catch (e: UnsatisfiedLinkError) {
-                Log.e(TAG, "!!! FATAL: OpenCV native library failed to load !!!", e)
-            }
-        }
-
-        @JvmStatic
-        fun updateSongInfo(songName: String?) {
-            val instance = instanceRef?.get() ?: return
-            if (instance.window == null || !instance::binding.isInitialized) {
-                Log.e(TAG, "DreamService instance is not ready in updateSongInfo")
-                return
-            }
-            val textView = instance.binding.songName
-            if (!songName.isNullOrBlank()) {
-                val formattedText = if (songName.contains('\n')) {
-                    val (title, artist) = songName.split('\n', limit = 2)
-                    val htmlString = "<b><font size='+4'>${escapeHtml(capitalizeWords(title))}</font></b><br>${escapeHtml(capitalizeWords(artist))}"
-                    fromHtml(htmlString)
-                } else {
-                    val htmlString = "<b><font size='+4'>${escapeHtml(capitalizeWords(songName))}</font></b>"
-                    fromHtml(htmlString)
-                }
-                // Apply extra boldness to the formatted text
-                val finalText = instance.applyExtraBoldness(formattedText)
-                textView.text = finalText
-                textView.visibility = View.VISIBLE
-                textView.gravity = android.view.Gravity.CENTER_HORIZONTAL
-                lastValidSongInfoHtml = finalText
-            } else {
-                if (lastValidSongInfoHtml != null) {
-                    textView.text = lastValidSongInfoHtml
-                    textView.visibility = View.VISIBLE
-                } else {
-                    textView.visibility = View.GONE
-                }
-            }
-        }
-
-        @JvmStatic
-        fun updateSongCount(count: Int) {
-            songCount = count
-            instanceRef?.get()?.updateSongCountUI(count)
-        }
 
         private fun escapeHtml(text: String?): String {
             return if (text == null) "" else TextUtils.htmlEncode(text)
@@ -172,70 +130,113 @@ class DreamService : android.service.dreams.DreamService() {
         }
 
         fun fromHtml(html: String): Spanned {
-            return HtmlCompat.fromHtml(html, HtmlCompat.FROM_HTML_MODE_LEGACY)
+            return androidx.core.text.HtmlCompat.fromHtml(html, androidx.core.text.HtmlCompat.FROM_HTML_MODE_LEGACY)
         }
     }
 
     override fun onCreate() {
         super.onCreate()
+        
+        // OPENCV INITIALIZATION COMMENTED OUT - Using GPUImage instead
+        // if (!OpenCVLoader.initLocal()) {
+        //     Log.e(TAG, "OpenCV failed to initialize. Canvas art will be disabled.")
+        // }
+        
         fixedHorizontalMargin = resources.getDimensionPixelSize(R.dimen.fixed_horizontal_margin)
-        instanceRef = WeakReference(this)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         canvasArtCacheDir = File(cacheDir, "canvas_art_cache").also { it.mkdirs() }
+    
+        // Initialize helper controllers
+        animationController = AnimationController(this, dreamServiceScope)
+        layoutManager = LayoutManager(this, fixedHorizontalMargin)
+        mediaSessionHandler = MediaSessionHandler(this, dreamServiceScope, cacheDir)
+        batteryMonitor = BatteryMonitor(this)
+        gestureHandler = GestureHandler(this, audioManager, { exitDream() }, { dispatchMediaKeyEvent(it) })
     }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        isFullscreen = true
+        isInteractive = true
+    
+        // Prevent duplicate receiver registration
+        if (isReceiverRegistered) return
+    
+        // Force System Rotation
+        window?.let { win ->
+            val params = win.attributes
+            params.screenOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+            win.attributes = params
+        }
+    
         NotificationService.setDreamActive(true)
-        instanceRef = WeakReference(this)
-        registerReceiver(updateNotificationReceiver, IntentFilter(NotificationService.UPDATE_NOTIFICATIONS_ACTION))
-        registerReceiver(mediaMetadataReceiver, IntentFilter(NotificationService.MEDIA_METADATA_UPDATED_ACTION))
-
-        // Enable auto-rotate if it was off
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (!Settings.System.canWrite(this)) {
-                // Prompt user to grant write settings permission if not already granted
-                val intent = Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS)
-                    .setData(Uri.parse("package:$packageName"))
-                startActivity(intent)
-                return  // Optionally handle this better; for now, exit early if permission not granted
-            }
-        }
-        originalAutoRotate = Settings.System.getInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, 1)
-        if (originalAutoRotate == 0) {
-            Settings.System.putInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, 1)
-            Log.d(TAG, "Temporarily enabled auto-rotate for screensaver")
-        }
-
-        setupUi()
-        populateUi()
-        startPeriodicUpdates()
+    
+        val notificationFilter = IntentFilter(NotificationService.UPDATE_NOTIFICATIONS_ACTION)
+        ContextCompat.registerReceiver(this, updateNotificationReceiver, notificationFilter, ContextCompat.RECEIVER_NOT_EXPORTED)
+    
+        val mediaFilter = IntentFilter(NotificationService.MEDIA_METADATA_UPDATED_ACTION)
+        ContextCompat.registerReceiver(this, mediaMetadataReceiver, mediaFilter, ContextCompat.RECEIVER_NOT_EXPORTED)
+    
+        val songCountFilter = IntentFilter(NotificationService.SONG_COUNT_UPDATED_ACTION)
+        ContextCompat.registerReceiver(this, songCountReceiver, songCountFilter, ContextCompat.RECEIVER_NOT_EXPORTED)
+    
+        isReceiverRegistered = true
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        Log.d(TAG, "Configuration changed. Re-populating existing UI with current data.")
-        // Removed the post to restoreUiState() here, as it will be handled in layoutChangeListener
+        Log.d(TAG, "Configuration changed: orientation=${newConfig.orientation}")
+
+        if (!::binding.isInitialized) return
+
+        // Re-apply media display for new orientation
+        NotificationService.lastKnownMediaInfo?.let { info ->
+            mediaSessionHandler.clearLastDisplayedInfo()
+            updateMediaDisplay(info.cleanedSongString, info.albumArt, info.cacheKey, animate = false)
+        } ?: run {
+            binding.songName.visibility = View.GONE
+            binding.canvasArtImageview.visibility = View.GONE
+        }
+
+        updateBoundsAndLayout(forceUpdateScale = true, shouldMove = true)
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onDreamingStarted() {
+        super.onDreamingStarted()
+
+        // Reset state for fresh start after orientation change
+        isCleaningUp = false
+        mediaSessionHandler.clearLastDisplayedInfo()
+
+        val inflater = getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
+        binding = ActivityScreensaverBinding.inflate(inflater)
+        setContentView(binding.root)
+
+        adjustBrightness(DaydreamSettings.Appearance.getDreamBrightnessPercent(this))
+        setSystemUiVisibility()
+        setupUi()
+        populateUi()
+        startPeriodicUpdates()
+
+        binding.root.postDelayed({
+            restoreUiState()
+            updateBoundsAndLayout(forceUpdateScale = true, shouldMove = true)
+        }, 100)
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupUi() {
         isInteractive = true
         isFullscreen = true
+        binding.contentContainer.pivotX = 0f
+        binding.contentContainer.pivotY = 0f
 
-        val inflater = getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
-        binding = ActivityScreensaverBinding.inflate(inflater)
-        setContentView(binding.root)
+        val songTouchListener = gestureHandler.createSongTouchListener(
+            binding.songName, binding.canvasArtImageview
+        )
 
-        adjustBrightness(10)
-        setSystemUiVisibility()
-
-        // 1. Initialize the single gesture detector for all media controls.
-        songGestureDetector = GestureDetector(this@DreamService, SongGestureListener())
-        val songTouchListener = View.OnTouchListener { _, event -> songGestureDetector.onTouchEvent(event) }
-
-        // 2. Apply the gesture listener to the song details text view.
         binding.songName.apply {
             visibility = View.GONE
             isClickable = true
@@ -243,320 +244,311 @@ class DreamService : android.service.dreams.DreamService() {
             setOnTouchListener(songTouchListener)
         }
 
-        // 3. Apply the SAME gesture listener to the album art image view.
         binding.canvasArtImageview.apply {
             isClickable = true
             isFocusable = true
             setOnTouchListener(songTouchListener)
         }
 
-        // 4. This detector handles exiting the screensaver on a double-tap on the background.
-        val exitGestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDoubleTap(e: MotionEvent): Boolean {
-                exitDream()
-                return true
-            }
-            // This ensures the exit detector only acts on touches OUTSIDE our interactive media controls.
-            override fun onDown(e: MotionEvent): Boolean {
-                val isTouchingSongName = isPointInsideView(e.rawX, e.rawY, binding.songName)
-                val isTouchingAlbumArt = isPointInsideView(e.rawX, e.rawY, binding.canvasArtImageview)
-                return !isTouchingSongName && !isTouchingAlbumArt
-            }
-        })
-
-        // 5. The root view's touch listener now cleanly passes all background touches to the exit detector.
-        window.decorView.setOnTouchListener { _, event ->
-            exitGestureDetector.onTouchEvent(event)
-        }
-
+        val exitTouchListener = gestureHandler.createExitGestureListener(
+            binding.songName, binding.canvasArtImageview
+        )
+        window.decorView.setOnTouchListener(exitTouchListener)
         window.decorView.removeOnLayoutChangeListener(layoutChangeListener)
         window.decorView.addOnLayoutChangeListener(layoutChangeListener)
     }
 
     private fun populateUi() {
-        Log.d(TAG, "Populating UI with all current data.")
         val prefs = getSharedPreferences("DaydreamSettings", Context.MODE_PRIVATE)
-        currentIconStyle = prefs.getInt("notificationIconStyle", ICON_STYLE_SYSTEM)
+        currentIconStyle = prefs.getInt("notificationIconStyle", IconStyle.SYSTEM)
 
-        // Explicitly refresh all data sources and UI components
-        updateBatteryInfo()
-        updateTimeInWords()
+        val mediaPrefs = getSharedPreferences("MediaPlaybackPrefs", Context.MODE_PRIVATE)
+        songCount = mediaPrefs.getInt("songCount", 0)
+
+        if (resources.getBoolean(R.bool.is_tv)) {
+            binding.batteryIcon.visibility = View.GONE
+            binding.batteryInfo.visibility = View.GONE
+        } else {
+            batteryMonitor.updateBatteryInfo(binding.batteryInfo, binding.batteryIcon)
+        }
+
+        updateTimeAndDateContent()
+        adjustContentScale(getTimeInWords(), animate = false)
         updateBatteryIconSize()
-        updateDayDateTextView()
         updateSongCountUI(songCount)
-
-        // Explicitly refresh notification icons
         updateNotificationIcons(NotificationService.getPackagesForIconDisplay())
 
-        // Explicitly refresh media display with proper state checking
         NotificationService.lastKnownMediaInfo?.let { info ->
-            updateMediaDisplay(info.cleanedSongString, info.albumArt, info.cacheKey)
+            updateMediaDisplay(info.cleanedSongString, info.albumArt, info.cacheKey, animate = false)
         } ?: run {
-            // If no media info, ensure song name is hidden
             binding.songName.visibility = View.GONE
             binding.canvasArtImageview.setImageBitmap(null)
         }
-
-        // Force layout update
-        binding.root.requestLayout()
     }
 
-    private fun updateMediaDisplay(songString: String?, albumArt: Bitmap?, cacheKey: String?) {
-        Log.d(TAG, "Updating media display for cache key: $cacheKey")
-        // Safeguard: Only update if binding is initialized
-        if (::binding.isInitialized) {
-            updateSongInfo(songString)
-            if (albumArt != null && cacheKey != null) {
-                processAndDisplayCanvasArt(albumArt, cacheKey)
-                // Ensure canvas art visibility matches orientation
-                val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-                binding.canvasArtImageview.visibility = if (isLandscape) View.VISIBLE else View.GONE
-            } else {
+    private fun updateMediaDisplay(songString: String?, albumArt: Bitmap?, cacheKey: String?, animate: Boolean = true) {
+        if (!::binding.isInitialized) return
+
+        val (newTitle, newArtist) = mediaSessionHandler.parseSongString(songString)
+        val safeCacheKey = cacheKey ?: "null"
+
+        if (!mediaSessionHandler.hasMediaInfoChanged(newTitle, newArtist, safeCacheKey)) {
+            return
+        }
+
+        mediaSessionHandler.updateLastDisplayedInfo(newTitle, newArtist, safeCacheKey)
+
+        val hasMedia = !songString.isNullOrBlank()
+
+        if (animate) {
+            dreamServiceScope.launch {
+                animationController.animateMediaFadeOut(binding.songName, binding.canvasArtImageview)
                 binding.canvasArtImageview.setImageBitmap(null)
+
+                if (hasMedia) {
+                    val formattedText = mediaSessionHandler.formatSongText(newTitle, newArtist)
+                    binding.songName.text = formattedText
+                    binding.songName.visibility = View.VISIBLE
+
+                    if (albumArt != null && cacheKey != null) {
+                        val finalArt = generateAndCacheArt(albumArt, cacheKey)
+                        binding.canvasArtImageview.setImageBitmap(finalArt)
+                        val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+                        binding.canvasArtImageview.visibility = if (isLandscape) View.VISIBLE else View.GONE
+                    } else {
+                        binding.canvasArtImageview.visibility = View.GONE
+                    }
+
+                    animationController.animateMediaFadeIn(binding.songName, binding.canvasArtImageview)
+                } else {
+                    binding.songName.visibility = View.GONE
+                    binding.canvasArtImageview.visibility = View.GONE
+                }
+
+                binding.root.post { updateBoundsAndLayout(forceUpdateScale = false, shouldMove = false) }
+            }
+        } else {
+            if (hasMedia) {
+                val formattedText = mediaSessionHandler.formatSongText(newTitle, newArtist)
+                binding.songName.text = formattedText
+                binding.songName.visibility = View.VISIBLE
+                binding.songName.alpha = 1f
+
+                if (albumArt != null && cacheKey != null) {
+                    // Set original album art immediately as placeholder
+                    binding.canvasArtImageview.setImageBitmap(albumArt)
+                    // Then generate artistic version asynchronously
+                    processAndDisplayCanvasArt(albumArt, cacheKey)
+                    val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+                    binding.canvasArtImageview.visibility = if (isLandscape) View.VISIBLE else View.GONE
+                    binding.canvasArtImageview.alpha = 1f
+                } else {
+                    binding.canvasArtImageview.visibility = View.GONE
+                }
+            } else {
+                binding.songName.visibility = View.GONE
                 binding.canvasArtImageview.visibility = View.GONE
             }
+            binding.root.post { updateBoundsAndLayout(forceUpdateScale = true, shouldMove = true) }
         }
     }
 
     override fun onDetachedFromWindow() {
+        // Ensure receivers are unregistered when window is detached
+        // This is critical to prevent IntentReceiver leaks
+        if (isReceiverRegistered) {
+            try {
+                unregisterReceiver(updateNotificationReceiver)
+                unregisterReceiver(mediaMetadataReceiver)
+                unregisterReceiver(songCountReceiver)
+            } catch (e: IllegalArgumentException) {
+                Log.w(TAG, "Receivers not registered during onDetachedFromWindow cleanup.", e)
+            }
+            isReceiverRegistered = false
+        }
+        performCleanup()
         super.onDetachedFromWindow()
-        // This is the system's standard exit path. Ensure cleanup is performed.
+    }
+
+    override fun onDreamingStopped() {
+        super.onDreamingStopped()
         performCleanup()
     }
 
     private fun performCleanup() {
-        // Use a flag to ensure this block of code only ever runs once.
         if (isCleaningUp) return
         isCleaningUp = true
 
-        Log.d(TAG, "Performing dream cleanup...")
-
         NotificationService.setDreamActive(false)
-        dreamServiceScope.cancel()
+        dreamServiceScope.coroutineContext.cancelChildren()
         restoreBrightness()
+
         if (window != null) {
             window.decorView.removeOnLayoutChangeListener(layoutChangeListener)
             window.decorView.setOnTouchListener(null)
         }
+
         try {
             unregisterReceiver(updateNotificationReceiver)
             unregisterReceiver(mediaMetadataReceiver)
+            unregisterReceiver(songCountReceiver)
         } catch (e: IllegalArgumentException) {
-            Log.w(TAG, "Receivers not registered during cleanup, skipping unregister.")
+            Log.w(TAG, "Receivers not registered during cleanup.")
         }
-
-        // Restore original auto-rotate setting if we changed it
-        if (originalAutoRotate == 0) {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.System.canWrite(this)) {
-                Settings.System.putInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, 0)
-                Log.d(TAG, "Restored original auto-rotate setting (disabled)")
-            } else {
-                Log.w(TAG, "Could not restore auto-rotate: Write Settings permission not granted.")
-            }
-        }
+    
+        isReceiverRegistered = false
     }
 
     private fun exitDream() {
-        // 1. Immediately tell the system to finish. The UI will disappear now.
+        performCleanup()
         finish()
-
-        // 2. Launch a coroutine to handle the cleanup tasks in the background
-        //    without delaying the UI transition.
-        CoroutineScope(Dispatchers.Main).launch {
-            performCleanup()
-        }
     }
 
-    override fun onDreamingStarted() {
-        super.onDreamingStarted()
-        Log.d(TAG, "Dreaming started, ensuring UI state is restored")
+    private fun adjustContentScale(timeStringHtml: String, animate: Boolean = true): Float {
+    if (!layoutManager.isFirstLayoutComplete() || window == null) {
+    binding.root.post { adjustContentScale(timeStringHtml, animate) }
+    return 1.0f
+    }
+    val screenWidth = window.decorView.width
+    val horizontalMargin = fixedHorizontalMargin * 2
+    val maxWidth = if (layoutManager.isLandscape()) {
+            (screenWidth / 2) - horizontalMargin
+        } else {
+            screenWidth - horizontalMargin
+        }
 
-        // Small delay to ensure everything is initialized
-        binding.root.postDelayed({
-            restoreUiState()
-        }, 100)
+        if (maxWidth <= 0) return 1.0f
+
+        val timeSpanned = fromHtml(timeStringHtml)
+        val tempTextView = TextView(this)
+        tempTextView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, binding.timeInWords.textSize)
+        tempTextView.typeface = binding.timeInWords.typeface
+        tempTextView.text = timeSpanned
+
+        val widthMeasureSpec = View.MeasureSpec.makeMeasureSpec(screenWidth, View.MeasureSpec.AT_MOST)
+        val heightMeasureSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        tempTextView.measure(widthMeasureSpec, heightMeasureSpec)
+
+        var naturalWidth = tempTextView.measuredWidth.toFloat()
+        if (naturalWidth <= 0) {
+            naturalWidth = maxWidth.toFloat()
+        }
+
+        val scaleFactor = (maxWidth * 0.98f) / naturalWidth
+
+        if (animate) {
+            binding.contentContainer.animate()
+                .scaleX(scaleFactor)
+                .scaleY(scaleFactor)
+                .setDuration(300L)
+                .start()
+        } else {
+            binding.contentContainer.scaleX = scaleFactor
+            binding.contentContainer.scaleY = scaleFactor
+        }
+        return scaleFactor
     }
 
-    /**
-     * A custom character style to apply a "faux bold" effect by adding a stroke.
-     * This makes text appear heavier when layered on top of an existing bold style.
-     */
-    private class FauxBoldSpan : android.text.style.CharacterStyle(), android.text.style.UpdateAppearance {
-        override fun updateDrawState(tp: android.text.TextPaint) {
-            // Use a stroke width proportional to the text size for a consistent effect.
-            val fauxBoldStrokeWidth = tp.textSize / 36f
-            tp.style = android.graphics.Paint.Style.FILL_AND_STROKE
-            tp.strokeWidth = fauxBoldStrokeWidth
+    private val songCountReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == NotificationService.SONG_COUNT_UPDATED_ACTION) {
+                val count = intent.getIntExtra("songCount", 0)
+                songCount = count
+                updateSongCountUI(count)
+            }
         }
-    }
-
-    /**
-     * Checks if the system-wide "Bold text" accessibility setting is enabled.
-     * NOTE: This is only reliably detectable on Android 12 (API 31) and newer.
-     */
-    private fun isSystemBoldEnabled(): Boolean {
-        // fontWeightAdjustment is the reliable way to check, available from API 31.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // A value of 300 or higher is typically used when bold text is enabled.
-            return resources.configuration.fontWeightAdjustment >= 300
-        }
-        // No reliable public API exists for this on older Android versions.
-        return false
-    }
-
-    /**
-     * Augments a Spanned text by making already-bold sections even bolder.
-     * It finds existing bold StyleSpans and applies a FauxBoldSpan on top of them.
-     */
-    private fun applyExtraBoldness(spanned: Spanned): Spanned {
-        if (!isSystemBoldEnabled()) {
-            return spanned // Do nothing if system bold is off.
-        }
-
-        val spannable = SpannableString(spanned)
-        // Find all StyleSpans that were created from the <b> tags.
-        val boldSpans = spannable.getSpans(0, spannable.length, android.text.style.StyleSpan::class.java)
-            .filter { it.style == android.graphics.Typeface.BOLD }
-
-        for (span in boldSpans) {
-            val start = spannable.getSpanStart(span)
-            val end = spannable.getSpanEnd(span)
-            // Layer our custom faux bold effect on top of the existing bold style.
-            spannable.setSpan(FauxBoldSpan(), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        }
-
-        return spannable
     }
 
     private val mediaMetadataReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val bundle = intent.extras
             val cleanedSongString = bundle?.getString("cleanedSongString")
-            val albumArt: Bitmap? = bundle?.let { getParcelableCompat(it, "albumArt", Bitmap::class.java) }
             val cacheKey: String? = bundle?.getString("cacheKey")
-            updateMediaDisplay(cleanedSongString, albumArt, cacheKey)
+            val albumArt: Bitmap? = NotificationService.lastKnownMediaInfo?.albumArt
+
+            updateMediaDisplay(cleanedSongString, albumArt, cacheKey, animate = true)
         }
     }
 
-    private fun updateBoundsAndLayout() {
+    private fun updateBoundsAndLayout(forceUpdateScale: Boolean, shouldMove: Boolean) {
+        if (!::binding.isInitialized || window == null) return
+
         val rootView = window.decorView
         val screenHeight = rootView.height
-        val contentHeight = binding.contentContainer.height
-        if (contentHeight > 0) {
-            maxVerticalMargin = (screenHeight - contentHeight).coerceAtLeast(0)
-            Log.d(TAG, "Vertical bounds recalculated. Max margin: $maxVerticalMargin")
-        }
         val currentOrientation = resources.configuration.orientation
-        isLandscape = currentOrientation == Configuration.ORIENTATION_LANDSCAPE
-        val songParams = binding.songName.layoutParams as RelativeLayout.LayoutParams
-        if (isLandscape) {
-            binding.canvasArtImageview.visibility = View.VISIBLE
-            songParams.removeRule(RelativeLayout.CENTER_HORIZONTAL)
-            songParams.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM)
-            songParams.addRule(RelativeLayout.RIGHT_OF, R.id.center_anchor)
-            songParams.addRule(RelativeLayout.ALIGN_PARENT_RIGHT)
-        } else {
-            binding.canvasArtImageview.visibility = View.GONE
-            songParams.removeRule(RelativeLayout.ALIGN_PARENT_RIGHT)
-            songParams.removeRule(RelativeLayout.RIGHT_OF)
-            songParams.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM)
-            songParams.addRule(RelativeLayout.CENTER_HORIZONTAL)
-        }
-        binding.songName.layoutParams = songParams
-        if (!isFirstLayoutComplete) {
-            isFirstLayoutComplete = true
-            Log.d(TAG, "First layout complete. Setting initial position.")
-            moveToRandomPosition()
-        }
+        val hasMedia = binding.songName.visibility == View.VISIBLE
 
-        // Force refresh UI state after layout changes
-        restoreUiState()
-    }
+        layoutManager.updateBoundsAndLayout(
+            contentContainer = binding.contentContainer,
+            songNameView = binding.songName,
+            canvasArtImageview = binding.canvasArtImageview,
+            timeInWordsView = binding.timeInWords,
+            screenHeight = screenHeight,
+            currentOrientation = currentOrientation,
+            hasMedia = hasMedia,
+            forceUpdateScale = forceUpdateScale,
+            shouldMove = shouldMove,
+            getTimeInWordsHtml = { getTimeInWords() }
+            )
+            // isFirstLayoutComplete is now managed solely by LayoutManager
+            }
 
     private fun restoreUiState() {
-        Log.d(TAG, "Restoring UI state after layout/orientation change")
-        // Restore media display if available
         NotificationService.lastKnownMediaInfo?.let { info ->
-            updateMediaDisplay(info.cleanedSongString, info.albumArt, info.cacheKey)
+            updateMediaDisplay(info.cleanedSongString, info.albumArt, info.cacheKey, animate = false)
         }
-        // Restore song count
         updateSongCountUI(songCount)
-        // Restore notification icons
         updateNotificationIcons(NotificationService.getPackagesForIconDisplay())
-        // Force visibility updates
-        binding.songName.post {
-            if (binding.songName.text.isNotEmpty()) {
-                binding.songName.visibility = View.VISIBLE
-            }
-        }
-        binding.root.requestLayout()  // Added to force redraw after updates
-    }
-
-    private inner class SongGestureListener : GestureDetector.SimpleOnGestureListener() {
-        private val swipeThreshold = 100
-        private val swipeVelocityThreshold = 100
-        override fun onDown(e: MotionEvent): Boolean = true
-        override fun onSingleTapUp(e: MotionEvent): Boolean {
-            dispatchMediaKeyEvent(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
-            return true
-        }
-
-        override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-            e1 ?: return false
-            val diffX = e2.x - e1.x
-            if (Math.abs(diffX) > Math.abs(e2.y - e1.y) &&
-                Math.abs(diffX) > swipeThreshold &&
-                Math.abs(velocityX) > swipeVelocityThreshold
-            ) {
-                if (diffX > 0) {
-                    dispatchMediaKeyEvent(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
-                } else {
-                    dispatchMediaKeyEvent(KeyEvent.KEYCODE_MEDIA_NEXT)
-                }
-
-                binding.songName.visibility = View.GONE
-                binding.canvasArtImageview.setImageBitmap(null)
-
-                return true
-            }
-            return false
-        }
+        // Defer requestLayout to avoid "requestLayout() improperly called during layout pass" warning
+        binding.root.post { binding.root.requestLayout() }
     }
 
     private fun startPeriodicUpdates() {
         dreamServiceScope.coroutineContext.cancelChildren()
+        dreamServiceScope.launch {
+            while (isActive) {
+                if (!resources.getBoolean(R.bool.is_tv)) {
+                    batteryMonitor.updateBatteryInfo(binding.batteryInfo, binding.batteryIcon)
+                }
+                delay(DaydreamSettings.Timing.getBatteryUpdateIntervalMs(this@DreamService))
+            }
+        }
+        startMinuteChangeSequenceLoop()
+    }
 
+    private fun startMinuteChangeSequenceLoop() {
         dreamServiceScope.launch {
             while (isActive) {
-                updateTimeInWords()
-                updateDayDateTextView()
-                delay(UPDATE_INTERVAL)
-            }
-        }
-        dreamServiceScope.launch {
-            while (isActive) {
-                updateBatteryInfo()
-                delay(BATTERY_UPDATE_INTERVAL)
-            }
-        }
-        dreamServiceScope.launch {
-            while (isActive) {
-                moveToRandomPosition()
-                delay(SHIFT_DURATION)
+                val calendar = Calendar.getInstance()
+                val msToNextBoundary = (60 - calendar.get(Calendar.SECOND)) * 1000L - calendar.get(Calendar.MILLISECOND)
+                val delayBeforeFadeOut = msToNextBoundary - animationController.transitionOutDurationMs
+        
+                if (delayBeforeFadeOut < 0) {
+                    // Too close to minute boundary - wait for the next minute instead
+                    delay(msToNextBoundary + 60000L - animationController.transitionOutDurationMs)
+                } else {
+                    delay(delayBeforeFadeOut)
+                }
+
+                animationController.animateAlphaManual(binding.contentContainer, isFadeOut = true)
+                binding.contentContainer.alpha = 0f
+
+                // Safety Wait
+                while (Calendar.getInstance().get(Calendar.SECOND) == 59) {
+                    delay(10)
+                }
+
+                updateTimeAndDateContent()
+                updateBoundsAndLayout(forceUpdateScale = true, shouldMove = true)
+
+                animationController.animateAlphaManual(binding.contentContainer, isFadeOut = false)
+                delay(DaydreamSettings.Timing.getPostAnimationDelayMs(this@DreamService))
             }
         }
     }
 
     private fun moveToRandomPosition() {
-        if (!isFirstLayoutComplete) {
-            Log.w(TAG, "Layout not ready, skipping shift.")
-            return
-        }
-        val params = binding.contentContainer.layoutParams as RelativeLayout.LayoutParams
-        params.leftMargin = fixedHorizontalMargin
-        params.topMargin = if (maxVerticalMargin > 0) Random.nextInt(0, maxVerticalMargin) else 0
-        binding.contentContainer.layoutParams = params
-        Log.d(TAG, "Shifting content to margins: (${params.leftMargin}, ${params.topMargin})")
+        layoutManager.moveToRandomPosition(binding.contentContainer)
     }
 
     private fun adjustBrightness(brightnessLevel: Int) {
@@ -564,25 +556,19 @@ class DreamService : android.service.dreams.DreamService() {
     }
 
     private fun restoreBrightness() {
-        Log.d(TAG, "Attempting to restore original brightness")
         BrightnessService.restoreOriginalBrightness(this)
     }
 
-    private fun updateTimeInWords() {
-        val timeInWordsHtml = fromHtml(getTimeInWords())
-        // Apply extra boldness if the system setting is on
-        binding.timeInWords.text = applyExtraBoldness(timeInWordsHtml)
+    private fun updateTimeAndDateContent() {
+        binding.timeInWords.text = fromHtml(getTimeInWords())
+        binding.dayDate.text = getDayDate()
     }
 
     private fun getTimeInWords(): String {
         val calendar = Calendar.getInstance()
         val timeKey = "time_${TIME_WORDS_FORMAT.format(calendar.time).replace(":", "_").uppercase()}"
         val resId = resources.getIdentifier(timeKey, "string", packageName)
-        return if (resId == 0) getString(R.string.default_time_string) else getString(resId)
-    }
-
-    private fun updateDayDateTextView() {
-        binding.dayDate.text = getDayDate()
+        return if (resId == 0) "Time Unknown" else getString(resId)
     }
 
     private fun getDayDate(): String {
@@ -590,53 +576,18 @@ class DreamService : android.service.dreams.DreamService() {
     }
 
     private fun updateBatteryInfo() {
-        val batteryLevel = getBatteryLevel()
-        binding.batteryInfo.text = "$batteryLevel%"
-        binding.batteryIcon.setImageResource(getBatteryIconResId(batteryLevel))
-    }
-
-    private fun getBatteryLevel(): Int {
-        val batteryStatus = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        return batteryStatus?.let { intent ->
-            val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-            val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-            if (level == -1 || scale == -1) 0 else (level.toFloat() / scale.toFloat() * 100).toInt()
-        } ?: 0
-    }
-
-    private fun getBatteryIconResId(batteryLevel: Int): Int {
-        return when {
-            batteryLevel >= 100 -> R.drawable.battery_charging_100
-            batteryLevel >= 95 -> R.drawable.battery_charging_95
-            batteryLevel >= 90 -> R.drawable.battery_charging_90
-            batteryLevel >= 85 -> R.drawable.battery_charging_85
-            batteryLevel >= 80 -> R.drawable.battery_charging_80
-            batteryLevel >= 75 -> R.drawable.battery_charging_75
-            batteryLevel >= 70 -> R.drawable.battery_charging_70
-            batteryLevel >= 65 -> R.drawable.battery_charging_65
-            batteryLevel >= 60 -> R.drawable.battery_charging_60
-            batteryLevel >= 55 -> R.drawable.battery_charging_55
-            batteryLevel >= 50 -> R.drawable.battery_charging_50
-            batteryLevel >= 45 -> R.drawable.battery_charging_45
-            batteryLevel >= 40 -> R.drawable.battery_charging_40
-            batteryLevel >= 35 -> R.drawable.battery_charging_35
-            batteryLevel >= 30 -> R.drawable.battery_charging_30
-            batteryLevel >= 25 -> R.drawable.battery_charging_25
-            batteryLevel >= 20 -> R.drawable.battery_charging_20
-            batteryLevel >= 15 -> R.drawable.battery_charging_15
-            batteryLevel >= 10 -> R.drawable.battery_charging_10
-            batteryLevel >= 5 -> R.drawable.battery_charging_5
-            else -> R.drawable.battery_charging_1
-        }
+        batteryMonitor.updateBatteryInfo(binding.batteryInfo, binding.batteryIcon)
     }
 
     private fun updateNotificationIcons(notificationPackages: Set<String>?) {
-        if (!::binding.isInitialized) return // Guard against uninitialized UI
+        if (!::binding.isInitialized) return
         val container = binding.notificationIconContainer
-        if (currentIconStyle == ICON_STYLE_OFF) {
+
+        if (currentIconStyle == IconStyle.OFF) {
             container.removeAllViews()
             return
         }
+
         container.removeAllViews()
         notificationPackages?.forEach { packageName ->
             fetchAndCacheNotificationIcon(packageName)?.let { icon ->
@@ -650,7 +601,7 @@ class DreamService : android.service.dreams.DreamService() {
                     }
                 }
                 container.addView(iconView)
-            } ?: Log.w(TAG, "Could not fetch icon for package: $packageName")
+            }
         }
     }
 
@@ -661,11 +612,11 @@ class DreamService : android.service.dreams.DreamService() {
         }
         try {
             val finalDrawable: Drawable? = when (currentIconStyle) {
-                ICON_STYLE_SYSTEM -> {
+                IconStyle.SYSTEM -> {
                     val systemIcon = NotificationService.getSmallIconForPackage(this, packageName)
                     systemIcon?.mutate()?.apply { setTint(Color.WHITE) }
                 }
-                ICON_STYLE_MONOCHROME -> {
+                IconStyle.MONOCHROME -> {
                     val originalIcon = packageManager.getApplicationIcon(packageName)
                     val originalBitmap = originalIcon.toBitmap()
                     val resultBitmap = originalBitmap.copy(Bitmap.Config.ARGB_8888, true)
@@ -676,20 +627,15 @@ class DreamService : android.service.dreams.DreamService() {
                     canvas.drawBitmap(originalBitmap, 0f, 0f, paint)
                     BitmapDrawable(resources, resultBitmap)
                 }
-                else -> {
-                    return null
-                }
+                else -> null
             }
             finalDrawable?.let {
                 iconCache[cacheKey] = it
                 cacheIcon(packageName, it)
             }
             return finalDrawable
-        } catch (e: PackageManager.NameNotFoundException) {
-            Log.e(TAG, "Failed to get icon for package: $packageName", e)
-            return null
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to process icon for $packageName", e)
+            Log.e(TAG, "Failed to get icon for $packageName", e)
             return null
         }
     }
@@ -708,7 +654,7 @@ class DreamService : android.service.dreams.DreamService() {
                 icon.bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)
             }
         } catch (e: IOException) {
-            Log.e(TAG, "Failed to cache icon for package: $packageName, style: $currentIconStyle", e)
+            Log.e(TAG, "Failed to cache icon for $packageName", e)
         }
     }
 
@@ -723,28 +669,34 @@ class DreamService : android.service.dreams.DreamService() {
     private fun processAndDisplayCanvasArt(sourceBitmap: Bitmap, cacheKey: String) {
         val cachedBitmap = memoryCache.get(cacheKey)
         if (cachedBitmap != null) {
-            Log.d(TAG, "Canvas art loaded from memory cache!")
             binding.canvasArtImageview.setImageBitmap(cachedBitmap)
+            binding.root.post { updateBoundsAndLayout(forceUpdateScale = false, shouldMove = false) }
             return
         }
         dreamServiceScope.launch {
             val finalBitmap = generateAndCacheArt(sourceBitmap, cacheKey)
             finalBitmap?.let {
                 memoryCache.put(cacheKey, it)
-                Log.d(TAG, "UI: Setting final bitmap from background task.")
                 binding.canvasArtImageview.setImageBitmap(it)
+                binding.root.post { updateBoundsAndLayout(forceUpdateScale = false, shouldMove = false) }
             }
         }
     }
 
-    private suspend fun generateAndCacheArt(sourceBitmap: Bitmap, cacheKey: String): Bitmap? = withContext(Dispatchers.IO) {
-        val cachedFile = File(canvasArtCacheDir, "$cacheKey.png")
-        if (cachedFile.exists()) {
-            Log.d(TAG, "Loading canvas art from disk cache for key: $cacheKey")
-            return@withContext BitmapFactory.decodeFile(cachedFile.absolutePath)
-        } else {
-            Log.d(TAG, "Generating new canvas art for key: $cacheKey")
-            val generatedArt = generateCanvasArt(sourceBitmap)
+    private suspend fun generateAndCacheArt(sourceBitmap: Bitmap, cacheKey: String): Bitmap? =
+        withContext(Dispatchers.IO) {
+            val cachedInMemory = memoryCache.get(cacheKey)
+            if (cachedInMemory != null) return@withContext cachedInMemory
+
+            val artCacheDir = canvasArtCacheDir ?: File(cacheDir, "canvas_art_cache").also { it.mkdirs() }
+            val cachedFile = File(artCacheDir, "$cacheKey.png")
+            if (cachedFile.exists()) {
+                return@withContext BitmapFactory.decodeFile(cachedFile.absolutePath)?.also {
+                    memoryCache.put(cacheKey, it)
+                }
+            }
+
+            val generatedArt = ArtisticRenderer.create(this@DreamService, sourceBitmap)
             generatedArt?.let {
                 try {
                     FileOutputStream(cachedFile).use { out ->
@@ -753,14 +705,10 @@ class DreamService : android.service.dreams.DreamService() {
                 } catch (e: IOException) {
                     Log.e(TAG, "Failed to save canvas art to cache", e)
                 }
+                memoryCache.put(cacheKey, it)
             }
             return@withContext generatedArt
         }
-    }
-
-    private fun generateCanvasArt(source: Bitmap): Bitmap? {
-        return CanvasGenerator.create(this, source)
-    }
 
     private fun updateSongCountUI(count: Int) {
         if (!::binding.isInitialized) return
@@ -775,19 +723,8 @@ class DreamService : android.service.dreams.DreamService() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        when (event.keyCode) {
-            KeyEvent.KEYCODE_VOLUME_UP -> {
-                if (event.action == KeyEvent.ACTION_DOWN) {
-                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, 0)
-                }
-                return true
-            }
-            KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                if (event.action == KeyEvent.ACTION_DOWN) {
-                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, 0)
-                }
-                return true
-            }
+        if (gestureHandler.handleVolumeKey(event)) {
+            return true
         }
         return super.dispatchKeyEvent(event)
     }
@@ -800,39 +737,16 @@ class DreamService : android.service.dreams.DreamService() {
         }
     }
 
-    private fun startNotificationService() {
-        startService(Intent(this, NotificationService::class.java))
-    }
-
-    private fun stopNotificationService() {
-        stopService(Intent(this, NotificationService::class.java))
-    }
-
     private fun updateBatteryIconSize() {
         binding.batteryIcon.layoutParams.apply {
             width = resources.getDimensionPixelSize(R.dimen.battery_icon_width)
             height = resources.getDimensionPixelSize(R.dimen.battery_icon_height)
         }
-        binding.batteryIcon.requestLayout()
+        // Defer requestLayout to avoid "requestLayout() improperly called during layout pass" warning
+        binding.batteryIcon.post { binding.batteryIcon.requestLayout() }
     }
 
-    private fun dispatchMediaKeyEvent(keyCode: Int) {
-        val eventTime = android.os.SystemClock.uptimeMillis()
-        val downEvent = KeyEvent(eventTime, eventTime, KeyEvent.ACTION_DOWN, keyCode, 0)
-        val upEvent = KeyEvent(eventTime, eventTime, KeyEvent.ACTION_UP, keyCode, 0)
-        audioManager.dispatchMediaKeyEvent(downEvent)
-        audioManager.dispatchMediaKeyEvent(upEvent)
-        Log.d(TAG, "Dispatched media key event: ${KeyEvent.keyCodeToString(keyCode)}")
+    private fun dispatchMediaKeyEvent(@Suppress("UNUSED_PARAMETER") keyCode: Int) {
         sendBroadcast(Intent(NotificationService.MEDIA_INFO_REQUEST_ACTION))
-        Log.d(TAG, "Sent immediate media info request after key dispatch.")
-    }
-
-    private fun isPointInsideView(x: Float, y: Float, view: View): Boolean {
-        if (view.visibility != View.VISIBLE) return false
-        val location = IntArray(2)
-        view.getLocationOnScreen(location)
-        val viewX = location[0]
-        val viewY = location[1]
-        return (x > viewX && x < (viewX + view.width)) && (y > viewY && y < (viewY + view.height))
     }
 }

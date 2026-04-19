@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <!-- ANIMATION SETTINGS -->
+    <PreferenceCategory
+        android:key="category_animation"
+        android:title="Animation"
+        android:summary="Control fade and transition effects"
+        app:iconSpaceReserved="false">
+
+        <SeekBarPreference
+            android:key="anim_transition_out_ms"
+            android:title="Fade Out Duration"
+            android:summary="Duration of fade out animation"
+            android:defaultValue="700"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+
+        <SeekBarPreference
+            android:key="anim_transition_in_ms"
+            android:title="Fade In Duration"
+            android:summary="Duration of fade in animation"
+            android:defaultValue="800"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+
+        <SeekBarPreference
+            android:key="anim_scale_duration_ms"
+            android:title="Scale Animation Duration"
+            android:summary="Duration of content scaling animation"
+            android:defaultValue="300"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
+    <!-- LAYOUT SETTINGS -->
+    <PreferenceCategory
+        android:key="category_layout"
+        android:title="Layout"
+        android:summary="Control size and positioning"
+        app:iconSpaceReserved="false">
+
+        <SeekBarPreference
+            android:key="layout_scale_percent"
+            android:title="Content Scale"
+            android:summary="0 = Auto, otherwise percentage of screen width"
+            android:defaultValue="0"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
+    <!-- APPEARANCE SETTINGS -->
+    <PreferenceCategory
+        android:key="category_appearance"
+        android:title="Appearance"
+        android:summary="Visual settings"
+        app:iconSpaceReserved="false">
+
+        <SeekBarPreference
+            android:key="appearance_brightness"
+            android:title="Screen Brightness"
+            android:summary="Brightness level during daydream"
+            android:defaultValue="10"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
+    <!-- GESTURE SETTINGS -->
+    <PreferenceCategory
+        android:key="category_gestures"
+        android:title="Gestures"
+        android:summary="Touch and swipe sensitivity"
+        app:iconSpaceReserved="false">
+
+        <SeekBarPreference
+            android:key="gesture_swipe_threshold"
+            android:title="Swipe Threshold"
+            android:summary="Minimum distance (pixels) to trigger swipe"
+            android:defaultValue="100"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
+    <!-- TIMING SETTINGS -->
+    <PreferenceCategory
+        android:key="category_timing"
+        android:title="Timing"
+        android:summary="Update intervals and delays"
+        app:iconSpaceReserved="false">
+
+        <SeekBarPreference
+            android:key="timing_battery_interval_ms"
+            android:title="Battery Update Interval"
+            android:summary="How often to refresh battery status"
+            android:defaultValue="60000"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+
+        <SeekBarPreference
+            android:key="timing_media_check_ms"
+            android:title="Media Session Check Interval"
+            android:summary="How often to check for media playback"
+            android:defaultValue="5000"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
+    <!-- IMAGE PROCESSING SETTINGS -->
+    <PreferenceCategory
+        android:key="category_image"
+        android:title="Album Art Processing"
+        android:summary="OpenCV filter settings for album art"
+        app:iconSpaceReserved="false">
+
+        <SwitchPreferenceCompat
+            android:key="img_use_inverted"
+            android:title="Use Inverted Sketch Style"
+            android:summary="Toggle between inverted and outline sketch"
+            android:defaultValue="true"
+            app:iconSpaceReserved="false" />
+
+        <SwitchPreferenceCompat
+            android:key="img_pencil_sketch"
+            android:title="Pencil Sketch Mode"
+            android:summary="Use shaded pencil effect instead of lines"
+            android:defaultValue="false"
+            app:iconSpaceReserved="false" />
+
+        <SwitchPreferenceCompat
+            android:key="img_histogram_eq"
+            android:title="Histogram Equalization"
+            android:summary="Enhance contrast for low-contrast images"
+            android:defaultValue="true"
+            app:iconSpaceReserved="false" />
+
+        <SeekBarPreference
+            android:key="img_min_line_thickness"
+            android:title="Minimum Line Thickness"
+            android:summary="Thinnest lines in the sketch"
+            android:defaultValue="2"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+
+        <SeekBarPreference
+            android:key="img_max_line_thickness"
+            android:title="Maximum Line Thickness"
+            android:summary="Thickest lines in the sketch"
+            android:defaultValue="4"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+
+        <SeekBarPreference
+            android:key="img_kuwahara_kernel"
+            android:title="Kuwahara Filter Size"
+            android:summary="Painterly smoothing intensity (odd values)"
+            android:defaultValue="5"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+
+        <SeekBarPreference
+            android:key="img_hierarchy_max"
+            android:title="Contour Hierarchy Depth"
+            android:summary="Max depth of nested contours to draw"
+            android:defaultValue="2"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
+    <!-- RESET -->
+    <PreferenceCategory
+        android:key="category_reset"
+        android:title="Reset"
+        app:iconSpaceReserved="false">
+
+        <Preference
+            android:key="reset_all"
+            android:title="Reset All Settings"
+            android:summary="Restore all settings to defaults"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>

@@ -1,19 +1,20 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Data extraction rules for Android 12+ backup.
    See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <!-- Include user settings -->
+        <include domain="sharedpref" path="daydream_settings.xml"/>
+        <include domain="sharedpref" path="DaydreamSettings.xml"/>
+        <!-- Exclude runtime data -->
+        <exclude domain="sharedpref" path="MediaPlaybackPrefs.xml"/>
+        <exclude domain="cache" path="."/>
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <include domain="sharedpref" path="daydream_settings.xml"/>
+        <include domain="sharedpref" path="DaydreamSettings.xml"/>
+        <exclude domain="cache" path="."/>
     </device-transfer>
-    -->
 </data-extraction-rules>

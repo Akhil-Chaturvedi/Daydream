@@ -1,5 +1,4 @@
 // In MainActivity.kt
-
 package com.bytesmith.daydream
 
 import android.content.ComponentName
@@ -10,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.TextUtils
+import android.view.View
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,14 +21,10 @@ class MainActivity : AppCompatActivity() {
     companion object {
         const val PREFS_NAME = "DaydreamSettings"
         const val KEY_ICON_STYLE = "notificationIconStyle"
-        const val ICON_STYLE_SYSTEM = 0
-        const val ICON_STYLE_MONOCHROME = 1
-        const val ICON_STYLE_OFF = 2
     }
 
     private var currentToast: Toast? = null
     private lateinit var binding: ActivityMainBinding
-
     private lateinit var writeSettingsLauncher: ActivityResultLauncher<Intent>
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -64,6 +60,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initializeButtons() {
+        if (resources.getBoolean(R.bool.is_tv)) {
+            binding.OverlayPermissionButton.visibility = View.GONE
+        } else {
+            binding.OverlayPermissionButton.setOnClickListener {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                    startActivity(intent)
+                }
+            }
+        }
+
         binding.ScreensaverButton.setOnClickListener {
             launchActivityByClassName(
                 "com.android.settings",
@@ -87,16 +94,21 @@ class MainActivity : AppCompatActivity() {
             cycleNotificationIconStyle()
         }
         updateIconStyleButton()
+
+        // Customize Daydream button - launches SettingsActivity
+        binding.customizeButton?.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
     }
 
     private fun cycleNotificationIconStyle() {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val currentStyle = prefs.getInt(KEY_ICON_STYLE, ICON_STYLE_SYSTEM) // Default to System
+        val currentStyle = prefs.getInt(KEY_ICON_STYLE, IconStyle.SYSTEM) // Default to System
 
         val nextStyle = when (currentStyle) {
-            ICON_STYLE_SYSTEM -> ICON_STYLE_MONOCHROME
-            ICON_STYLE_MONOCHROME -> ICON_STYLE_OFF
-            else -> ICON_STYLE_SYSTEM // Covers OFF and any other case
+            IconStyle.SYSTEM -> IconStyle.MONOCHROME
+            IconStyle.MONOCHROME -> IconStyle.OFF
+            else -> IconStyle.SYSTEM // Covers OFF and any other case
         }
 
         prefs.edit().putInt(KEY_ICON_STYLE, nextStyle).apply()
@@ -105,11 +117,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateIconStyleButton() {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val currentStyle = prefs.getInt(KEY_ICON_STYLE, ICON_STYLE_SYSTEM)
+        val currentStyle = prefs.getInt(KEY_ICON_STYLE, IconStyle.SYSTEM)
 
         binding.notificationIconStyleButton.text = when (currentStyle) {
-            ICON_STYLE_SYSTEM -> "Icon Style: System"
-            ICON_STYLE_MONOCHROME -> "Icon Style: Monochrome"
+            IconStyle.SYSTEM -> "Icon Style: System"
+            IconStyle.MONOCHROME -> "Icon Style: Monochrome"
             else -> "Icon Style: Off"
         }
     }
@@ -158,7 +170,7 @@ class MainActivity : AppCompatActivity() {
             true
         }
     }
-    
+
     private fun launchActivity(intent: Intent) {
         try {
             startActivity(intent)

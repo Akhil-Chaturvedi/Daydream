@@ -74,16 +74,6 @@
             android:padding="12dp"
             tools:text="Icon Style: Color" />
 
-        <Button
-            android:id="@+id/customizeButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="200dp"
-            android:layout_marginTop="16dp"
-            android:padding="12dp"
-            android:text="Customize Daydream"
-            style="@style/Widget.Material3.Button.TonalButton" />
-
     </LinearLayout>
 
     <TextView

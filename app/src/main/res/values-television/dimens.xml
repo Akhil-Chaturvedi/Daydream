@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+    Default values from your phone's dimens.xml are commented out for comparison.
+    These new values are optimized for a "10-foot UI" experience on a TV.
+    -->
+
+    <!-- <dimen name="text_size_time_in_words">30sp</dimen> -->
+    <dimen name="text_size_time_in_words">64sp</dimen>
+
+    <!-- <dimen name="text_size_day_date">25sp</dimen> -->
+    <dimen name="text_size_day_date">48sp</dimen>
+
+    <!-- <dimen name="text_size_battery_info">20sp</dimen> -->
+    <dimen name="text_size_battery_info">32sp</dimen>
+
+    <!-- <dimen name="battery_icon_width">30dp</dimen> -->
+    <dimen name="battery_icon_width">48dp</dimen>
+
+    <!-- <dimen name="battery_icon_height">30dp</dimen> -->
+    <dimen name="battery_icon_height">48dp</dimen>
+
+    <!-- <dimen name="notification_icon_container_height">30dp</dimen> -->
+    <dimen name="notification_icon_container_height">48dp</dimen>
+
+    <!-- <dimen name="notification_icon_size">24dp</dimen> -->
+    <dimen name="notification_icon_size">36dp</dimen>
+
+    <!-- Margins can also be adjusted for better spacing on a large screen -->
+    <dimen name="notification_icon_margin">8dp</dimen>
+    <dimen name="fixed_horizontal_margin">0dp</dimen>
+    <dimen name="margin_top_day_date">0dp</dimen>
+    <dimen name="margin_top_battery_icon">0dp</dimen>
+    <dimen name="margin_top_notification_icons">10dp</dimen>
+    <dimen name="margin_start_battery_info">10dp</dimen>
+    <dimen name="margin_start_song_count">10dp</dimen>
+</resources>
